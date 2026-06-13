@@ -141,7 +141,7 @@ struct AddItemView: View {
     }
 
     private var locationLabel: String {
-        if let selectedLocationID {
+        if let selectedLocationID = viewModel.selectedLocationID {
             return store.locationPathDescription(for: selectedLocationID)
         }
 

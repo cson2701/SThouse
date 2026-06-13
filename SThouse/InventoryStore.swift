@@ -85,8 +85,10 @@ final class InventoryStore {
 
         withAnimation(.easeInOut(duration: 0.25)) {
             locations.removeAll { idsToDelete.contains($0.id) }
-            for index in items.indices where idsToDelete.contains(items[index].locationID) {
-                items[index].locationID = nil
+            for index in items.indices {
+                if let locationID = items[index].locationID, idsToDelete.contains(locationID) {
+                    items[index].locationID = nil
+                }
             }
         }
     }
@@ -112,6 +114,20 @@ final class InventoryStore {
 
     func hasChildren(_ id: UUID) -> Bool {
         locations.contains { $0.parentID == id }
+    }
+
+    func items(at locationID: UUID?) -> [InventoryItem] {
+        items.filter { $0.locationID == locationID }
+    }
+
+    func directItemCount(at locationID: UUID?) -> Int {
+        items(at: locationID).count
+    }
+
+    func totalItemCount(in locationID: UUID) -> Int {
+        directItemCount(at: locationID) + children(of: locationID).reduce(0) { partialResult, child in
+            partialResult + totalItemCount(in: child.id)
+        }
     }
 
     func breadcrumb(for locationID: UUID?) -> [InventoryLocationNode] {

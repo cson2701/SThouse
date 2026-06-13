@@ -17,6 +17,9 @@
 "inventory.field.name" = "名称";
 "inventory.field.location" = "位置";
 "inventory.location.select" = "选择位置";
+"inventory.location.selectNode" = "选择位置";
+"inventory.location.deselectNode" = "取消选择位置";
+"inventory.location.selectCurrent" = "选择此位置";
 "inventory.location.manage" = "管理位置";
 "inventory.location.manage.empty.title" = "还没有位置";
 "inventory.location.manage.empty.subtitle" = "先创建一个房间，再继续搭建树状结构。";
