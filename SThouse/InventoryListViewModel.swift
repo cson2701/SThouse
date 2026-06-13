@@ -26,48 +26,37 @@ final class InventoryListViewModel {
         }
     }
 
-    var items: [InventoryItem]
+    let store: InventoryStore
     var activeSheet: Sheet?
     var pendingDeleteItem: InventoryItem?
     var isShowingDeleteConfirmation = false
 
-    init(items: [InventoryItem]? = nil) {
-        self.items = items ?? [
-            InventoryItem(name: "Cordless Drill", room: "Garage", category: InventoryCategory.tools.rawValue, quantity: 1),
-            InventoryItem(name: "Paper Towels", room: "Kitchen", category: InventoryCategory.supplies.rawValue, quantity: 6),
-            InventoryItem(name: "Desk Lamp", room: "Office", category: InventoryCategory.electronics.rawValue, quantity: 1),
-            InventoryItem(name: "Bed Sheets", room: "Bedroom", category: InventoryCategory.textiles.rawValue, quantity: 2)
-        ]
+    init(store: InventoryStore = InventoryStore()) {
+        self.store = store
+    }
+
+    var items: [InventoryItem] {
+        store.items
     }
 
     var itemCount: Int {
-        items.count
+        store.itemCount
     }
 
     var totalQuantity: Int {
-        items.reduce(0) { $0 + $1.quantity }
+        store.totalQuantity
     }
 
     func addItem(_ item: InventoryItem) {
-        withAnimation(.easeInOut(duration: 0.25)) {
-            items.insert(item, at: 0)
-        }
+        store.addItem(item)
     }
 
     func updateItem(_ item: InventoryItem) {
-        guard let index = items.firstIndex(where: { $0.id == item.id }) else {
-            return
-        }
-
-        withAnimation(.easeInOut(duration: 0.25)) {
-            items[index] = item
-        }
+        store.updateItem(item)
     }
 
     func deleteItem(id: UUID) {
-        withAnimation(.easeInOut(duration: 0.25)) {
-            items.removeAll { $0.id == id }
-        }
+        store.deleteItem(id: id)
     }
 
     func requestDelete(_ item: InventoryItem) {
@@ -88,8 +77,36 @@ final class InventoryListViewModel {
         clearPendingDelete()
     }
 
-    func item(for id: UUID) -> InventoryItem? {
-        items.first(where: { $0.id == id })
+    func locationPathDescription(for locationID: UUID?) -> String {
+        store.locationPathDescription(for: locationID)
+    }
+
+    func locationBreadcrumb(for locationID: UUID?) -> [InventoryLocationNode] {
+        store.breadcrumb(for: locationID)
+    }
+
+    func location(id: UUID?) -> InventoryLocationNode? {
+        store.location(id: id)
+    }
+
+    func children(of parentID: UUID?) -> [InventoryLocationNode] {
+        store.children(of: parentID)
+    }
+
+    func hasChildren(_ id: UUID) -> Bool {
+        store.hasChildren(id)
+    }
+
+    func addLocation(name: String, parentID: UUID?) -> InventoryLocationNode {
+        store.addLocation(name: name, parentID: parentID)
+    }
+
+    func renameLocation(id: UUID, name: String) {
+        store.renameLocation(id: id, name: name)
+    }
+
+    func deleteLocationSubtree(id: UUID) {
+        store.deleteLocationSubtree(id: id)
     }
 
     private func clearPendingDelete() {
