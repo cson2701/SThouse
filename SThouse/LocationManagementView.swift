@@ -90,9 +90,11 @@ private struct LocationTreeEditorRow: View {
                     Text(node.name)
                         .font(.headline)
 
-                    Text(store.locationPathDescription(for: node.id))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if let subtitle = node.parentID == nil ? nil : store.locationPathDescription(for: node.id) {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Spacer(minLength: 12)
@@ -167,7 +169,7 @@ private struct LocationEditorSheet: View {
                 } header: {
                     Text(headerTitle)
                 } footer: {
-                    Text(footerText)
+                    footerText
                 }
             }
             .navigationTitle(sheetTitle)
@@ -235,7 +237,7 @@ private struct LocationEditorSheet: View {
 
         switch target.mode {
         case .add(let parentID):
-            store.addLocation(name: trimmedName, parentID: parentID)
+            _ = store.addLocation(name: trimmedName, parentID: parentID)
         case .rename(let node):
             store.renameLocation(id: node.id, name: trimmedName)
         }

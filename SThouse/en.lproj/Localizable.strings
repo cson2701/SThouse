@@ -17,6 +17,9 @@
 "inventory.field.name" = "Name";
 "inventory.field.location" = "Location";
 "inventory.location.select" = "Select location";
+"inventory.location.selectNode" = "Select location";
+"inventory.location.deselectNode" = "Deselect location";
+"inventory.location.selectCurrent" = "Select this location";
 "inventory.location.manage" = "Manage locations";
 "inventory.location.manage.empty.title" = "No locations yet";
 "inventory.location.manage.empty.subtitle" = "Create a room to start building the tree.";

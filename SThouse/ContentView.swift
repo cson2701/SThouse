@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     enum DisplayMode: String, CaseIterable, Identifiable {
@@ -78,12 +79,7 @@ struct ContentView: View {
                             )
                         } else {
                             ForEach(viewModel.items) { item in
-                                InventoryRow(
-                                    item: item,
-                                    locationLabel: viewModel.locationPathDescription(for: item.locationID)
-                                ) {
-                                    viewModel.activeSheet = .edit(item)
-                                }
+                                listInventoryRow(for: item)
                                 .transition(.opacity)
                                 .listRowInsets(EdgeInsets())
                                 .listRowBackground(Color.clear)
@@ -150,6 +146,20 @@ struct ContentView: View {
             }
         }
     }
+
+    @ViewBuilder
+    private func listInventoryRow(for item: InventoryItem) -> some View {
+        InventoryRow(
+            item: item,
+            locationLabel: viewModel.locationPathDescription(for: item.locationID),
+            onTap: {
+                viewModel.activeSheet = .edit(item)
+            },
+            onDelete: {
+                viewModel.requestDelete(item)
+            }
+        )
+    }
 }
 
 private struct SummaryCard: View {
@@ -177,6 +187,7 @@ private struct TreeInventoryView: View {
     let onDeleteItem: (InventoryItem) -> Void
 
     @State private var expandedLocationIDs: Set<UUID> = []
+    @State private var isUnassignedExpanded = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -185,19 +196,18 @@ private struct TreeInventoryView: View {
                     title: String(localized: "inventory.tree.unassigned"),
                     subtitle: String(localized: "inventory.tree.unassigned.subtitle"),
                     count: orphanItems.count,
-                    isExpanded: true
+                    isExpanded: isUnassignedExpanded,
+                    onToggle: {
+                        isUnassignedExpanded.toggle()
+                    }
                 ) {
-                    ForEach(orphanItems) { item in
-                        InventoryLeafRow(item: item) {
-                            onEditItem(item)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button {
+                    if isUnassignedExpanded {
+                        ForEach(orphanItems) { item in
+                            InventoryLeafContextRow(item: item) {
+                                onEditItem(item)
+                            } onDelete: {
                                 onDeleteItem(item)
-                            } label: {
-                                Label("inventory.delete", systemImage: "trash")
                             }
-                            .tint(.red)
                         }
                     }
                 }
@@ -236,7 +246,7 @@ private struct InventoryLocationTreeNode: View {
 
         TreeNodeSection(
             title: location.name,
-            subtitle: store.locationPathDescription(for: location.id),
+            subtitle: location.parentID == nil ? nil : store.locationPathDescription(for: location.id),
             count: totalCount,
             isExpanded: isExpanded,
             indentation: 0,
@@ -248,22 +258,16 @@ private struct InventoryLocationTreeNode: View {
                 }
             }
         ) {
-            ForEach(directItems) { item in
-                InventoryLeafRow(item: item) {
-                    onEditItem(item)
-                }
-                .padding(.leading, 18)
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button {
-                        onDeleteItem(item)
-                    } label: {
-                        Label("inventory.delete", systemImage: "trash")
-                    }
-                    .tint(.red)
-                }
-            }
-
             if isExpanded {
+                ForEach(directItems) { item in
+                    InventoryLeafContextRow(item: item) {
+                        onEditItem(item)
+                    } onDelete: {
+                        onDeleteItem(item)
+                    }
+                    .padding(.leading, 28)
+                }
+
                 ForEach(children) { child in
                     InventoryLocationTreeNode(
                         store: store,
@@ -281,7 +285,7 @@ private struct InventoryLocationTreeNode: View {
 
 private struct TreeNodeSection<Content: View>: View {
     let title: String
-    let subtitle: String
+    let subtitle: String?
     let count: Int
     let isExpanded: Bool
     var indentation: CGFloat = 0
@@ -303,9 +307,11 @@ private struct TreeNodeSection<Content: View>: View {
                         Text(title)
                             .font(.headline)
 
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        if let subtitle {
+                            Text(subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
                     Spacer(minLength: 8)
@@ -327,33 +333,74 @@ private struct TreeNodeSection<Content: View>: View {
     }
 }
 
-private struct InventoryLeafRow: View {
+private struct InventoryLeafContextRow: View {
     let item: InventoryItem
-    let onTap: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+    @State private var isPressed = false
+    @State private var isShowingMenu = false
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.name)
-                        .font(.body.weight(.medium))
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Image(systemName: "shippingbox.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
 
-                    Text(localizedCategoryName(for: item.category))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.name)
+                    .font(.body.weight(.medium))
 
-                Spacer(minLength: 12)
-
-                Text("x\(item.quantity)")
-                    .font(.caption.weight(.semibold))
+                Text(localizedCategoryName(for: item.category))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
+
+            Spacer(minLength: 12)
+
+            Text("x\(item.quantity)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
         }
-        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 10)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .contentShape(Rectangle())
+        .scaleEffect(isPressed ? 1.03 : 1.0)
+        .shadow(color: .black.opacity(isPressed ? 0.12 : 0), radius: isPressed ? 10 : 0, y: isPressed ? 4 : 0)
+        .animation(.easeOut(duration: 0.14), value: isPressed)
+        .onTapGesture(perform: onEdit)
+        .onLongPressGesture(
+            minimumDuration: 0.35,
+            pressing: { pressing in
+                withAnimation(.easeOut(duration: 0.14)) {
+                    isPressed = pressing
+                }
+            },
+            perform: {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                isPressed = false
+                isShowingMenu = true
+            }
+        )
+        .confirmationDialog(
+            "",
+            isPresented: $isShowingMenu,
+            titleVisibility: .hidden
+        ) {
+            Button {
+                onEdit()
+            } label: {
+                Label("inventory.editItem", systemImage: "pencil")
+            }
+
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("inventory.delete", systemImage: "trash")
+            }
+        }
     }
 
     private func localizedCategoryName(for categoryCode: String) -> String {
@@ -365,44 +412,48 @@ private struct InventoryRow: View {
     let item: InventoryItem
     let locationLabel: String
     let onTap: () -> Void
+    let onDelete: () -> Void
 
     var body: some View {
-        Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text(item.name)
-                        .font(.headline)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(item.name)
+                    .font(.headline)
 
-                    Spacer()
+                Spacer()
 
-                    Text("x\(item.quantity)")
-                        .font(.subheadline.bold())
-                        .foregroundStyle(.secondary)
-                }
-
-                Text("\(locationLabel)  •  \(localizedCategoryName(for: item.category))")
-                    .font(.subheadline)
+                Text("x\(item.quantity)")
+                    .font(.subheadline.bold())
                     .foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .contentShape(Rectangle())
+
+            Text("\(locationLabel)  •  \(localizedCategoryName(for: item.category))")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
-        .buttonStyle(InventoryRowButtonStyle())
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .background(Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
+        .contextMenu {
+            Button {
+                onTap()
+            } label: {
+                Label("inventory.editItem", systemImage: "pencil")
+            }
+
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("inventory.delete", systemImage: "trash")
+            }
+        }
     }
 
     private func localizedCategoryName(for categoryCode: String) -> String {
         InventoryCategory(rawValue: categoryCode)?.localizedTitle ?? categoryCode
-    }
-}
-
-private struct InventoryRowButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.vertical, 10)
-            .padding(.horizontal, 16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(configuration.isPressed ? Color.secondary.opacity(0.16) : Color.clear)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 

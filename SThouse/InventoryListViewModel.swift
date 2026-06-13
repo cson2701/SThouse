@@ -31,7 +31,11 @@ final class InventoryListViewModel {
     var pendingDeleteItem: InventoryItem?
     var isShowingDeleteConfirmation = false
 
-    init(store: InventoryStore = InventoryStore()) {
+    init() {
+        self.store = InventoryStore()
+    }
+
+    init(store: InventoryStore) {
         self.store = store
     }
 

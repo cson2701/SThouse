@@ -13,25 +13,29 @@ struct LocationSelectionView: View {
     @Binding var selectedLocationID: UUID?
 
     @State private var isShowingManagement = false
+    @State private var navigationPath: [UUID] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             LocationLevelView(
                 store: store,
                 parentID: nil,
+                currentLocationID: nil,
                 selectedLocationID: $selectedLocationID,
-                onSelectLeaf: {
-                    dismiss()
-                }
+                onConfirmSelection: { dismiss() },
+                onManageLocations: { isShowingManagement = true }
             )
-            .navigationTitle("inventory.location.select")
+            .navigationDestination(for: UUID.self) { locationID in
+                LocationLevelView(
+                    store: store,
+                    parentID: locationID,
+                    currentLocationID: locationID,
+                    selectedLocationID: $selectedLocationID,
+                    onConfirmSelection: { dismiss() },
+                    onManageLocations: { isShowingManagement = true }
+                )
+            }
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("inventory.location.manage") {
-                        isShowingManagement = true
-                    }
-                }
-
                 ToolbarItem(placement: .cancellationAction) {
                     Button("inventory.cancel") {
                         dismiss()
@@ -48,8 +52,41 @@ struct LocationSelectionView: View {
 private struct LocationLevelView: View {
     let store: InventoryStore
     let parentID: UUID?
+    let currentLocationID: UUID?
     @Binding var selectedLocationID: UUID?
-    let onSelectLeaf: () -> Void
+    let onConfirmSelection: () -> Void
+    let onManageLocations: () -> Void
+
+    @State private var draftSelectedLocationID: UUID?
+    @State private var lockedSelectionID: UUID?
+
+    init(
+        store: InventoryStore,
+        parentID: UUID?,
+        currentLocationID: UUID?,
+        selectedLocationID: Binding<UUID?>,
+        onConfirmSelection: @escaping () -> Void,
+        onManageLocations: @escaping () -> Void
+    ) {
+        self.store = store
+        self.parentID = parentID
+        self.currentLocationID = currentLocationID
+        self._selectedLocationID = selectedLocationID
+        self.onConfirmSelection = onConfirmSelection
+        self.onManageLocations = onManageLocations
+
+        let initialSelection = store.children(of: parentID).first { $0.id == selectedLocationID.wrappedValue }?.id
+        _draftSelectedLocationID = State(initialValue: initialSelection)
+        _lockedSelectionID = State(initialValue: selectedLocationID.wrappedValue)
+    }
+
+    private var hasSelectionOnCurrentScreen: Bool {
+        guard let draftSelectedLocationID else {
+            return false
+        }
+
+        return draftSelectedLocationID != lockedSelectionID
+    }
 
     var body: some View {
         List {
@@ -62,47 +99,47 @@ private struct LocationLevelView: View {
                 )
             } else {
                 ForEach(children) { node in
-                    if store.hasChildren(node.id) {
-                        NavigationLink {
-                            LocationLevelView(
-                                store: store,
-                                parentID: node.id,
-                                selectedLocationID: $selectedLocationID,
-                                onSelectLeaf: onSelectLeaf
-                            )
-                        } label: {
-                            LocationNodeRow(
-                                title: node.name,
-                                subtitle: store.locationPathDescription(for: node.id),
-                                isSelected: selectedLocationID == node.id,
-                                showsChevron: true
-                            )
+                    LocationSelectionRow(
+                        store: store,
+                        node: node,
+                        selectedLocationID: $draftSelectedLocationID,
+                        lockedSelectionID: $lockedSelectionID
+                    )
+                }
+            }
+        }
+        .navigationTitle(currentLocationID.map { store.location(id: $0)?.name ?? String(localized: "inventory.location.select") } ?? String(localized: "inventory.location.select"))
+        .listStyle(.insetGrouped)
+        .toolbar {
+            if currentLocationID != nil {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("inventory.location.selectCurrent") {
+                        selectedLocationID = draftSelectedLocationID
+                        onConfirmSelection()
+                    }
+                    .disabled(!hasSelectionOnCurrentScreen)
+                }
+            } else {
+                ToolbarItem(placement: .confirmationAction) {
+                    if hasSelectionOnCurrentScreen {
+                        Button("inventory.location.selectCurrent") {
+                            selectedLocationID = draftSelectedLocationID
+                            onConfirmSelection()
                         }
                     } else {
-                        Button {
-                            selectedLocationID = node.id
-                            onSelectLeaf()
-                        } label: {
-                            LocationNodeRow(
-                                title: node.name,
-                                subtitle: store.locationPathDescription(for: node.id),
-                                isSelected: selectedLocationID == node.id,
-                                showsChevron: false
-                            )
+                        Button("inventory.location.manage") {
+                            onManageLocations()
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
         }
-        .listStyle(.insetGrouped)
     }
 }
 
 private struct LocationNodeRow: View {
     let title: String
-    let subtitle: String
-    let isSelected: Bool
+    let subtitle: String?
     let showsChevron: Bool
 
     var body: some View {
@@ -111,17 +148,16 @@ private struct LocationNodeRow: View {
                 Text(title)
                     .font(.body.weight(.medium))
 
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Spacer(minLength: 12)
 
-            if isSelected {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.tint)
-            } else if showsChevron {
+            if showsChevron {
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.secondary)
@@ -129,5 +165,69 @@ private struct LocationNodeRow: View {
         }
         .contentShape(Rectangle())
         .padding(.vertical, 4)
+    }
+}
+
+private struct LocationSelectionRow: View {
+    let store: InventoryStore
+    let node: InventoryLocationNode
+    @Binding var selectedLocationID: UUID?
+    @Binding var lockedSelectionID: UUID?
+
+    private var isSelected: Bool {
+        selectedLocationID == node.id
+    }
+
+    private var isLocked: Bool {
+        lockedSelectionID == node.id && selectedLocationID == lockedSelectionID
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button {
+                guard !isLocked else {
+                    return
+                }
+
+                if lockedSelectionID != nil, lockedSelectionID != node.id {
+                    lockedSelectionID = nil
+                }
+
+                selectedLocationID = isSelected ? nil : node.id
+            } label: {
+                if isSelected && isLocked {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                } else if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.tint)
+                } else {
+                    Image(systemName: "circle")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isLocked)
+            .accessibilityLabel(Text(isSelected ? "inventory.location.deselectNode" : "inventory.location.selectNode"))
+
+            if store.hasChildren(node.id) {
+                NavigationLink(value: node.id) {
+                    LocationNodeRow(
+                        title: node.name,
+                        subtitle: node.parentID == nil ? nil : store.locationPathDescription(for: node.id),
+                        showsChevron: true
+                    )
+                }
+            } else {
+                LocationNodeRow(
+                    title: node.name,
+                    subtitle: node.parentID == nil ? nil : store.locationPathDescription(for: node.id),
+                    showsChevron: false
+                )
+            }
+        }
     }
 }
