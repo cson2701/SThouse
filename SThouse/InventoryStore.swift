@@ -120,6 +120,19 @@ final class InventoryStore {
         items.filter { $0.locationID == locationID }
     }
 
+    func items(matching query: String) -> [InventoryItem] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            return items
+        }
+
+        return items.filter { item in
+            item.name.localizedCaseInsensitiveContains(trimmedQuery)
+                || locationPathDescription(for: item.locationID).localizedCaseInsensitiveContains(trimmedQuery)
+                || localizedCategoryName(for: item.category).localizedCaseInsensitiveContains(trimmedQuery)
+        }
+    }
+
     func directItemCount(at locationID: UUID?) -> Int {
         items(at: locationID).count
     }
@@ -224,5 +237,9 @@ final class InventoryStore {
         ]
 
         return (items, locations)
+    }
+
+    private func localizedCategoryName(for categoryCode: String) -> String {
+        InventoryCategory(rawValue: categoryCode)?.localizedTitle ?? categoryCode
     }
 }

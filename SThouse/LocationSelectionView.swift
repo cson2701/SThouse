@@ -37,9 +37,12 @@ struct LocationSelectionView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("inventory.cancel") {
+                    Button {
                         dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
                     }
+                    .accessibilityLabel(Text("inventory.cancel"))
                 }
             }
             .sheet(isPresented: $isShowingManagement) {
@@ -113,7 +116,11 @@ private struct LocationLevelView: View {
         .toolbar {
             if currentLocationID != nil {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("inventory.location.selectCurrent") {
+                    ToolbarActionButton(
+                        systemImage: "checkmark",
+                        accessibilityLabel: "inventory.location.selectCurrent",
+                        style: .prominentBlue
+                    ) {
                         selectedLocationID = draftSelectedLocationID
                         onConfirmSelection()
                     }
@@ -122,12 +129,19 @@ private struct LocationLevelView: View {
             } else {
                 ToolbarItem(placement: .confirmationAction) {
                     if hasSelectionOnCurrentScreen {
-                        Button("inventory.location.selectCurrent") {
+                        ToolbarActionButton(
+                            systemImage: "checkmark",
+                            accessibilityLabel: "inventory.location.selectCurrent",
+                            style: .prominentBlue
+                        ) {
                             selectedLocationID = draftSelectedLocationID
                             onConfirmSelection()
                         }
                     } else {
-                        Button("inventory.location.manage") {
+                        ToolbarActionButton(
+                            systemImage: "square.grid.2x2",
+                            accessibilityLabel: "inventory.location.manage"
+                        ) {
                             onManageLocations()
                         }
                     }

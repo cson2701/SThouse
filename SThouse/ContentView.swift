@@ -5,6 +5,7 @@
 //  Created by Gavin Song on 13/6/2026.
 //
 
+import Foundation
 import SwiftUI
 import UIKit
 
@@ -28,6 +29,8 @@ struct ContentView: View {
     @State private var viewModel = InventoryListViewModel()
     @State private var isShowingLocationManagement = false
     @State private var displayMode: DisplayMode = .tree
+    @State private var isSearchBarVisible = false
+    @State private var searchBarVisibilityTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -71,14 +74,14 @@ struct ContentView: View {
                     }
                 case .list:
                     Section("inventory.section.inventory") {
-                        if viewModel.items.isEmpty {
+                        if viewModel.filteredItems.isEmpty {
                             ContentUnavailableView(
-                                "inventory.empty.title",
-                                systemImage: "shippingbox",
-                                description: Text("inventory.empty.subtitle")
+                                viewModel.isShowingSearchResults ? "No matching items" : "inventory.empty.title",
+                                systemImage: viewModel.isShowingSearchResults ? "magnifyingglass" : "shippingbox",
+                                description: viewModel.isShowingSearchResults ? Text("Try a different search term.") : Text("inventory.empty.subtitle")
                             )
                         } else {
-                            ForEach(viewModel.items) { item in
+                            ForEach(viewModel.filteredItems) { item in
                                 listInventoryRow(for: item)
                                 .transition(.opacity)
                                 .listRowInsets(EdgeInsets())
@@ -96,12 +99,24 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("SThouse")
+            .searchableIfNeeded(
+                text: $viewModel.searchQuery,
+                isEnabled: isSearchBarVisible && displayMode == .list,
+                prompt: "Search items"
+            )
+            .onAppear {
+                updateSearchBarVisibility(for: displayMode)
+            }
+            .onChange(of: displayMode) { _, newDisplayMode in
+                updateSearchBarVisibility(for: newDisplayMode)
+            }
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button {
+                    ToolbarActionButton(
+                        systemImage: "square.grid.2x2",
+                        accessibilityLabel: "inventory.location.manage"
+                    ) {
                         isShowingLocationManagement = true
-                    } label: {
-                        Label("inventory.location.manage", systemImage: "square.grid.2x2")
                     }
 
                     Button {
@@ -150,7 +165,11 @@ struct ContentView: View {
     private func listInventoryRow(for item: InventoryItem) -> some View {
         InventoryRow(
             item: item,
-            locationLabel: viewModel.locationPathDescription(for: item.locationID),
+            itemName: highlightedText(for: item.name, matching: viewModel.searchQuery),
+            locationLabel: highlightedText(
+                for: "\(viewModel.locationPathDescription(for: item.locationID))  •  \(localizedCategoryName(for: item.category))",
+                matching: viewModel.searchQuery
+            ),
             onTap: {
                 viewModel.activeSheet = .edit(item)
             },
@@ -158,6 +177,60 @@ struct ContentView: View {
                 viewModel.requestDelete(item)
             }
         )
+    }
+
+    private func highlightedText(for string: String, matching query: String) -> AttributedString {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        var attributed = AttributedString(string)
+
+        guard !trimmedQuery.isEmpty else {
+            return attributed
+        }
+
+        var searchStart = string.startIndex
+        while searchStart < string.endIndex,
+              let matchRange = string.range(
+                of: trimmedQuery,
+                options: [.caseInsensitive, .diacriticInsensitive],
+                range: searchStart..<string.endIndex,
+                locale: .current
+              ) {
+            if let attributedRange = Range(matchRange, in: attributed) {
+                attributed[attributedRange].inlinePresentationIntent = .stronglyEmphasized
+            }
+
+            searchStart = matchRange.upperBound
+        }
+
+        return attributed
+    }
+
+    private func localizedCategoryName(for categoryCode: String) -> String {
+        InventoryCategory(rawValue: categoryCode)?.localizedTitle ?? categoryCode
+    }
+
+    private func updateSearchBarVisibility(for displayMode: DisplayMode) {
+        searchBarVisibilityTask?.cancel()
+
+        isSearchBarVisible = false
+
+        guard displayMode == .list else {
+            return
+        }
+
+        searchBarVisibilityTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else {
+                return
+            }
+
+            isSearchBarVisible = true
+        }
     }
 }
 
@@ -348,7 +421,7 @@ private struct InventoryLeafContextRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.name)
-                    .font(.body.weight(.medium))
+                    .font(.body)
 
                 Text(localizedCategoryName(for: item.category))
                     .font(.caption)
@@ -409,7 +482,8 @@ private struct InventoryLeafContextRow: View {
 
 private struct InventoryRow: View {
     let item: InventoryItem
-    let locationLabel: String
+    let itemName: AttributedString
+    let locationLabel: AttributedString
     let onTap: () -> Void
     let onDelete: () -> Void
 
@@ -417,8 +491,8 @@ private struct InventoryRow: View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text(item.name)
-                        .font(.headline)
+                    Text(itemName)
+                        .font(.body)
 
                     Spacer()
 
@@ -427,7 +501,7 @@ private struct InventoryRow: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Text("\(locationLabel)  •  \(localizedCategoryName(for: item.category))")
+                Text(locationLabel)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -450,10 +524,6 @@ private struct InventoryRow: View {
             }
         }
     }
-
-    private func localizedCategoryName(for categoryCode: String) -> String {
-        InventoryCategory(rawValue: categoryCode)?.localizedTitle ?? categoryCode
-    }
 }
 
 private struct InventoryRowButtonStyle: ButtonStyle {
@@ -465,6 +535,21 @@ private struct InventoryRowButtonStyle: ButtonStyle {
             }
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func searchableIfNeeded(
+        text: Binding<String>,
+        isEnabled: Bool,
+        prompt: LocalizedStringKey
+    ) -> some View {
+        if isEnabled {
+            searchable(text: text, prompt: prompt)
+        } else {
+            self
+        }
     }
 }
 
