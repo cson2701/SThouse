@@ -82,8 +82,7 @@ struct ContentView: View {
                                 listInventoryRow(for: item)
                                 .transition(.opacity)
                                 .listRowInsets(EdgeInsets())
-                                .listRowBackground(Color.clear)
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                     Button {
                                         viewModel.requestDelete(item)
                                     } label: {
@@ -415,28 +414,28 @@ private struct InventoryRow: View {
     let onDelete: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(item.name)
-                    .font(.headline)
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(item.name)
+                        .font(.headline)
 
-                Spacer()
+                    Spacer()
 
-                Text("x\(item.quantity)")
-                    .font(.subheadline.bold())
+                    Text("x\(item.quantity)")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("\(locationLabel)  •  \(localizedCategoryName(for: item.category))")
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-
-            Text("\(locationLabel)  •  \(localizedCategoryName(for: item.category))")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 16)
         }
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .padding(.vertical, 10)
-        .padding(.horizontal, 16)
-        .background(Color.clear)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
+        .buttonStyle(InventoryRowButtonStyle())
         .contextMenu {
             Button {
                 onTap()
@@ -454,6 +453,18 @@ private struct InventoryRow: View {
 
     private func localizedCategoryName(for categoryCode: String) -> String {
         InventoryCategory(rawValue: categoryCode)?.localizedTitle ?? categoryCode
+    }
+}
+
+private struct InventoryRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.primary.opacity(configuration.isPressed ? 0.10 : 0))
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
