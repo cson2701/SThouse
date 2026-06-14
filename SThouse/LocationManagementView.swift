@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct LocationManagementView: View {
+    @Environment(\.dismiss) private var dismiss
     let store: InventoryStore
 
     @State private var editorTarget: LocationEditorTarget?
@@ -46,10 +47,21 @@ struct LocationManagementView: View {
             }
             .navigationTitle("inventory.location.manage")
             .toolbar {
-                Button {
-                    editorTarget = .add(parentID: nil)
-                } label: {
-                    Label("inventory.location.addRoot", systemImage: "plus")
+                ToolbarItem(placement: .cancellationAction) {
+                    ToolbarActionButton(
+                        systemImage: "xmark",
+                        accessibilityLabel: "inventory.cancel"
+                    ) {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        editorTarget = .add(parentID: nil)
+                    } label: {
+                        Label("inventory.location.addRoot", systemImage: "plus")
+                    }
                 }
             }
             .sheet(item: $editorTarget) { target in
@@ -67,7 +79,8 @@ struct LocationManagementView: View {
                     store.deleteLocationSubtree(id: node.id)
                 }
 
-                Button("inventory.cancel", role: .cancel) {}
+                Button("inventory.cancel", role: .cancel) {
+                }
             } message: { node in
                 Text("inventory.location.delete.message")
             }
@@ -175,13 +188,20 @@ private struct LocationEditorSheet: View {
             .navigationTitle(sheetTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("inventory.cancel") {
+                    ToolbarActionButton(
+                        systemImage: "xmark",
+                        accessibilityLabel: "inventory.cancel"
+                    ) {
                         dismiss()
                     }
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("inventory.save") {
+                    ToolbarActionButton(
+                        systemImage: "checkmark",
+                        accessibilityLabel: "inventory.save",
+                        style: .prominentBlue
+                    ) {
                         save()
                     }
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

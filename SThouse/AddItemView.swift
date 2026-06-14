@@ -97,13 +97,20 @@ struct AddItemView: View {
             .navigationTitle(mode.title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("inventory.cancel") {
+                    ToolbarActionButton(
+                        systemImage: "xmark",
+                        accessibilityLabel: "inventory.cancel"
+                    ) {
                         dismiss()
                     }
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(mode.saveTitle) {
+                    ToolbarActionButton(
+                        systemImage: "checkmark",
+                        accessibilityLabel: mode.saveTitle,
+                        style: .prominentBlue
+                    ) {
                         onSave(viewModel.makeItem())
                         dismiss()
                     }
@@ -133,7 +140,7 @@ struct AddItemView: View {
                     dismiss()
                 }
 
-                Button("inventory.cancel", role: .cancel) {}
+                Button("inventory.cancel", role: .cancel) { }
             } message: { itemName in
                 Text(verbatim: String(format: String(localized: "inventory.delete.confirmation.message"), itemName))
             }

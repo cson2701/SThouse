@@ -30,6 +30,7 @@ final class InventoryListViewModel {
     var activeSheet: Sheet?
     var pendingDeleteItem: InventoryItem?
     var isShowingDeleteConfirmation = false
+    var searchQuery = ""
 
     init() {
         self.store = InventoryStore()
@@ -41,6 +42,14 @@ final class InventoryListViewModel {
 
     var items: [InventoryItem] {
         store.items
+    }
+
+    var filteredItems: [InventoryItem] {
+        store.items(matching: searchQuery)
+    }
+
+    var isShowingSearchResults: Bool {
+        !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var itemCount: Int {
