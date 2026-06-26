@@ -11,6 +11,7 @@ import UIKit
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
+    let authSession: FirebaseAuthSession
 
     enum DisplayMode: String, CaseIterable, Identifiable {
         case tree
@@ -137,6 +138,20 @@ struct ContentView: View {
                 }
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        if !authSession.userEmail.isEmpty {
+                            Text(authSession.userEmail)
+                        }
+
+                        Button("Sign out", role: .destructive) {
+                            authSession.signOut()
+                        }
+                    } label: {
+                        Image(systemName: "person.crop.circle")
+                    }
+                }
+
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     ToolbarActionButton(
                         systemImage: "square.grid.2x2",
@@ -321,7 +336,7 @@ private struct SyncStatusCard: View {
     private var detailText: String {
         switch indicator {
         case .disabled:
-            return "Add FirebaseConfig.plist to enable cloud sync."
+            return "Sign in to enable cloud sync."
         case .idle:
             if let lastSuccessfulSyncAt {
                 return "Last sync \(lastSuccessfulSyncAt.formatted(date: .abbreviated, time: .shortened))"
@@ -649,5 +664,5 @@ private extension View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(authSession: FirebaseAuthSession())
 }

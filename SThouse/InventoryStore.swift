@@ -8,10 +8,13 @@
 import Foundation
 import Observation
 import SwiftUI
+import FirebaseAuth
 
 @MainActor
 @Observable
 final class InventoryStore {
+    private static let sharedPersistenceNamespace = "shared-household"
+
     var items: [InventoryItem]
     var locations: [InventoryLocationNode]
     var syncIndicator: InventorySyncIndicator
@@ -25,10 +28,12 @@ final class InventoryStore {
     @ObservationIgnored private var syncTask: Task<Void, Never>?
 
     init(items: [InventoryItem]? = nil, locations: [InventoryLocationNode]? = nil) {
-        let persistence = InventoryLocalPersistence()
+        let persistenceNamespace = Auth.auth().currentUser != nil ? Self.sharedPersistenceNamespace : "offline"
+        let persistence = InventoryLocalPersistence(namespace: persistenceNamespace)
         self.persistence = persistence
-        if let configuration = FirebaseSyncConfiguration() {
-            self.remoteSync = FirebaseSyncClient(configuration: configuration)
+        let remoteSync = FirebaseSyncClient()
+        if remoteSync.isEnabled {
+            self.remoteSync = remoteSync
             self.syncIndicator = .idle
         } else {
             self.remoteSync = DisabledRemoteSyncClient()
@@ -44,9 +49,8 @@ final class InventoryStore {
             self.items = items
             self.locations = locations
         } else {
-            let seed = Self.makeSeedData()
-            self.items = seed.items
-            self.locations = seed.locations
+            self.items = []
+            self.locations = []
         }
 
         Task {
@@ -69,7 +73,7 @@ final class InventoryStore {
     }
 
     func addItem(_ item: InventoryItem) {
-        let persistedItem = item.withUpdatedTimestamp()
+        let persistedItem = item.withUpdatedMetadata(editor: currentEditorIdentity())
         withAnimation(.easeInOut(duration: 0.25)) {
             items.insert(persistedItem, at: 0)
         }
@@ -82,7 +86,7 @@ final class InventoryStore {
             return
         }
 
-        let updatedItem = item.withUpdatedTimestamp()
+        let updatedItem = item.withUpdatedMetadata(editor: currentEditorIdentity())
         withAnimation(.easeInOut(duration: 0.25)) {
             items[index] = updatedItem
         }
@@ -100,7 +104,7 @@ final class InventoryStore {
         }
 
         enqueueItemMutation(
-            for: item.markedDeleted(at: .now),
+            for: item.markedDeleted(at: .now, editor: currentEditorIdentity()),
             operation: .delete
         )
         schedulePersistenceAndSync()
@@ -142,6 +146,7 @@ final class InventoryStore {
                 if let locationID = items[index].locationID, idsToDelete.contains(locationID) {
                     items[index].locationID = nil
                     items[index].updatedAt = .now
+                    items[index].lastEditedBy = currentEditorIdentity()
                 }
             }
         }
@@ -151,7 +156,7 @@ final class InventoryStore {
         }
 
         for item in items where item.locationID == nil {
-            enqueueItemMutation(for: item.withUpdatedTimestamp(), operation: .upsert)
+            enqueueItemMutation(for: item.withUpdatedMetadata(editor: currentEditorIdentity()), operation: .upsert)
         }
 
         schedulePersistenceAndSync()
@@ -388,75 +393,30 @@ final class InventoryStore {
         return ids
     }
 
-    private static func makeSeedData() -> (items: [InventoryItem], locations: [InventoryLocationNode]) {
-        let bedroom = InventoryLocationNode(name: "Bedroom", parentID: nil, sortOrder: 0)
-        let bedsideTable = InventoryLocationNode(name: "Bedside Table", parentID: bedroom.id, sortOrder: 0)
-        let wardrobe = InventoryLocationNode(name: "Wardrobe", parentID: bedroom.id, sortOrder: 1)
-
-        let livingRoom = InventoryLocationNode(name: "Living Room", parentID: nil, sortOrder: 1)
-        let tvUnit = InventoryLocationNode(name: "TV Unit", parentID: livingRoom.id, sortOrder: 0)
-        let leftDrawer = InventoryLocationNode(name: "Left Drawer", parentID: tvUnit.id, sortOrder: 0)
-        let rightDrawer = InventoryLocationNode(name: "Right Drawer", parentID: tvUnit.id, sortOrder: 1)
-
-        let kitchen = InventoryLocationNode(name: "Kitchen", parentID: nil, sortOrder: 2)
-        let pantry = InventoryLocationNode(name: "Pantry", parentID: kitchen.id, sortOrder: 0)
-
-        let garage = InventoryLocationNode(name: "Garage", parentID: nil, sortOrder: 3)
-        let toolCabinet = InventoryLocationNode(name: "Tool Cabinet", parentID: garage.id, sortOrder: 0)
-
-        let office = InventoryLocationNode(name: "Office", parentID: nil, sortOrder: 4)
-        let desk = InventoryLocationNode(name: "Desk", parentID: office.id, sortOrder: 0)
-        let deskDrawer = InventoryLocationNode(name: "Desk Drawer", parentID: desk.id, sortOrder: 0)
-
-        let bathroom = InventoryLocationNode(name: "Bathroom", parentID: nil, sortOrder: 5)
-        let cabinet = InventoryLocationNode(name: "Cabinet", parentID: bathroom.id, sortOrder: 0)
-
-        let locations = [
-            bedroom,
-            bedsideTable,
-            wardrobe,
-            livingRoom,
-            tvUnit,
-            leftDrawer,
-            rightDrawer,
-            kitchen,
-            pantry,
-            garage,
-            toolCabinet,
-            office,
-            desk,
-            deskDrawer,
-            bathroom,
-            cabinet
-        ]
-
-        let items = [
-            InventoryItem(name: "Cordless Drill", locationID: toolCabinet.id, category: InventoryCategory.tools.rawValue, quantity: 1),
-            InventoryItem(name: "Paper Towels", locationID: pantry.id, category: InventoryCategory.supplies.rawValue, quantity: 6),
-            InventoryItem(name: "Desk Lamp", locationID: deskDrawer.id, category: InventoryCategory.electronics.rawValue, quantity: 1),
-            InventoryItem(name: "Bed Sheets", locationID: wardrobe.id, category: InventoryCategory.textiles.rawValue, quantity: 2)
-        ]
-
-        return (items, locations)
-    }
-
     private func localizedCategoryName(for categoryCode: String) -> String {
         InventoryCategory(rawValue: categoryCode)?.localizedTitle ?? categoryCode
+    }
+
+    private func currentEditorIdentity() -> String? {
+        let user = Auth.auth().currentUser
+        return user?.email ?? user?.uid
     }
 }
 
 private extension InventoryItem {
-    func withUpdatedTimestamp(_ date: Date = .now) -> InventoryItem {
+    func withUpdatedMetadata(_ date: Date = .now, editor: String?) -> InventoryItem {
         var copy = self
         copy.updatedAt = date
+        copy.lastEditedBy = editor
         copy.isDeleted = false
         return copy
     }
 
-    func markedDeleted(at date: Date) -> InventoryItem {
+    func markedDeleted(at date: Date, editor: String?) -> InventoryItem {
         var copy = self
         copy.isDeleted = true
         copy.updatedAt = date
+        copy.lastEditedBy = editor
         return copy
     }
 }
