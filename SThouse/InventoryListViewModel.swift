@@ -60,6 +60,18 @@ final class InventoryListViewModel {
         store.totalQuantity
     }
 
+    var syncIndicator: InventorySyncIndicator {
+        store.syncIndicator
+    }
+
+    var pendingChangeCount: Int {
+        store.pendingChangeCount
+    }
+
+    var lastSuccessfulSyncAt: Date? {
+        store.lastSuccessfulSyncAt
+    }
+
     func addItem(_ item: InventoryItem) {
         store.addItem(item)
     }
@@ -120,6 +132,10 @@ final class InventoryListViewModel {
 
     func deleteLocationSubtree(id: UUID) {
         store.deleteLocationSubtree(id: id)
+    }
+
+    func syncNow() async {
+        await store.syncNow()
     }
 
     private func clearPendingDelete() {

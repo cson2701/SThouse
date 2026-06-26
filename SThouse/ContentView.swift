@@ -10,6 +10,8 @@ import SwiftUI
 import UIKit
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
+
     enum DisplayMode: String, CaseIterable, Identifiable {
         case tree
         case list
@@ -40,6 +42,21 @@ struct ContentView: View {
                         SummaryCard(title: "inventory.summary.itemTypes", value: "\(viewModel.itemCount)")
                         SummaryCard(title: "inventory.summary.totalQuantity", value: "\(viewModel.totalQuantity)")
                     }
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                }
+
+                Section {
+                    SyncStatusCard(
+                        indicator: viewModel.syncIndicator,
+                        pendingChangeCount: viewModel.pendingChangeCount,
+                        lastSuccessfulSyncAt: viewModel.lastSuccessfulSyncAt,
+                        onSync: {
+                            Task {
+                                await viewModel.syncNow()
+                            }
+                        }
+                    )
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                 }
@@ -109,6 +126,15 @@ struct ContentView: View {
             }
             .onChange(of: displayMode) { _, newDisplayMode in
                 updateSearchBarVisibility(for: newDisplayMode)
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else {
+                    return
+                }
+
+                Task {
+                    await viewModel.syncNow()
+                }
             }
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -250,6 +276,75 @@ private struct SummaryCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct SyncStatusCard: View {
+    let indicator: InventorySyncIndicator
+    let pendingChangeCount: Int
+    let lastSuccessfulSyncAt: Date?
+    let onSync: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Image(systemName: indicator.systemImageName)
+                    .foregroundStyle(iconColor)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(indicator.title)
+                        .font(.headline)
+
+                    Text(detailText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 12)
+
+                Button("Sync", action: onSync)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(indicator == .syncing || indicator == .disabled)
+            }
+
+            if pendingChangeCount > 0 {
+                Text("\(pendingChangeCount) pending local change\(pendingChangeCount == 1 ? "" : "s")")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var detailText: String {
+        switch indicator {
+        case .disabled:
+            return "Add FirebaseConfig.plist to enable cloud sync."
+        case .idle:
+            if let lastSuccessfulSyncAt {
+                return "Last sync \(lastSuccessfulSyncAt.formatted(date: .abbreviated, time: .shortened))"
+            }
+            return "Local data is ready."
+        case .syncing:
+            return "Pushing local changes and fetching the latest inventory."
+        case .failed(let message):
+            return message
+        }
+    }
+
+    private var iconColor: Color {
+        switch indicator {
+        case .disabled:
+            .secondary
+        case .idle:
+            .green
+        case .syncing:
+            .blue
+        case .failed:
+            .orange
+        }
     }
 }
 
