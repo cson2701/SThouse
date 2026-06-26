@@ -14,17 +14,46 @@ import SwiftUI
 final class InventoryStore {
     var items: [InventoryItem]
     var locations: [InventoryLocationNode]
+    var syncIndicator: InventorySyncIndicator
+    var lastSuccessfulSyncAt: Date?
+    var pendingChangeCount: Int
+
+    @ObservationIgnored private var pendingMutations: [InventoryPendingMutation]
+    @ObservationIgnored private let persistence: InventoryLocalPersistence
+    @ObservationIgnored private let remoteSync: InventoryRemoteSyncing
+    @ObservationIgnored private var syncState: InventorySyncState
+    @ObservationIgnored private var syncTask: Task<Void, Never>?
 
     init(items: [InventoryItem]? = nil, locations: [InventoryLocationNode]? = nil) {
+        let persistence = InventoryLocalPersistence()
+        self.persistence = persistence
+        if let configuration = FirebaseSyncConfiguration() {
+            self.remoteSync = FirebaseSyncClient(configuration: configuration)
+            self.syncIndicator = .idle
+        } else {
+            self.remoteSync = DisabledRemoteSyncClient()
+            self.syncIndicator = .disabled
+        }
+
+        self.syncState = .empty
+        self.lastSuccessfulSyncAt = nil
+        self.pendingMutations = []
+        self.pendingChangeCount = 0
+
         if let items, let locations {
             self.items = items
             self.locations = locations
-            return
+        } else {
+            let seed = Self.makeSeedData()
+            self.items = seed.items
+            self.locations = seed.locations
         }
 
-        let seed = Self.makeSeedData()
-        self.items = items ?? seed.items
-        self.locations = locations ?? seed.locations
+        Task {
+            await restorePersistedStateIfAvailable()
+            await persistSnapshot()
+            await syncNow()
+        }
     }
 
     var itemCount: Int {
@@ -40,9 +69,12 @@ final class InventoryStore {
     }
 
     func addItem(_ item: InventoryItem) {
+        let persistedItem = item.withUpdatedTimestamp()
         withAnimation(.easeInOut(duration: 0.25)) {
-            items.insert(item, at: 0)
+            items.insert(persistedItem, at: 0)
         }
+        enqueueItemMutation(for: persistedItem, operation: .upsert)
+        schedulePersistenceAndSync()
     }
 
     func updateItem(_ item: InventoryItem) {
@@ -50,15 +82,28 @@ final class InventoryStore {
             return
         }
 
+        let updatedItem = item.withUpdatedTimestamp()
         withAnimation(.easeInOut(duration: 0.25)) {
-            items[index] = item
+            items[index] = updatedItem
         }
+        enqueueItemMutation(for: updatedItem, operation: .upsert)
+        schedulePersistenceAndSync()
     }
 
     func deleteItem(id: UUID) {
+        guard let item = items.first(where: { $0.id == id }) else {
+            return
+        }
+
         withAnimation(.easeInOut(duration: 0.25)) {
             items.removeAll { $0.id == id }
         }
+
+        enqueueItemMutation(
+            for: item.markedDeleted(at: .now),
+            operation: .delete
+        )
+        schedulePersistenceAndSync()
     }
 
     func addLocation(name: String, parentID: UUID?) -> InventoryLocationNode {
@@ -67,6 +112,8 @@ final class InventoryStore {
         withAnimation(.easeInOut(duration: 0.25)) {
             locations.append(node)
         }
+        enqueueLocationMutation(for: node.withUpdatedTimestamp(), operation: .upsert)
+        schedulePersistenceAndSync()
         return node
     }
 
@@ -75,22 +122,39 @@ final class InventoryStore {
             return
         }
 
+        let updatedLocation = locations[index].renamed(name)
         withAnimation(.easeInOut(duration: 0.25)) {
-            locations[index].name = name
+            locations[index] = updatedLocation
         }
+        enqueueLocationMutation(for: updatedLocation, operation: .upsert)
+        schedulePersistenceAndSync()
     }
 
     func deleteLocationSubtree(id: UUID) {
         let idsToDelete = subtreeIDs(startingAt: id)
+        let deletedLocations = locations
+            .filter { idsToDelete.contains($0.id) }
+            .map { $0.markedDeleted(at: .now) }
 
         withAnimation(.easeInOut(duration: 0.25)) {
             locations.removeAll { idsToDelete.contains($0.id) }
             for index in items.indices {
                 if let locationID = items[index].locationID, idsToDelete.contains(locationID) {
                     items[index].locationID = nil
+                    items[index].updatedAt = .now
                 }
             }
         }
+
+        for location in deletedLocations {
+            enqueueLocationMutation(for: location, operation: .delete)
+        }
+
+        for item in items where item.locationID == nil {
+            enqueueItemMutation(for: item.withUpdatedTimestamp(), operation: .upsert)
+        }
+
+        schedulePersistenceAndSync()
     }
 
     func location(id: UUID?) -> InventoryLocationNode? {
@@ -172,6 +236,143 @@ final class InventoryStore {
         !hasChildren(id)
     }
 
+    func syncNow() async {
+        guard remoteSync.isEnabled else {
+            syncIndicator = .disabled
+            return
+        }
+
+        guard syncTask == nil else {
+            return
+        }
+
+        syncIndicator = .syncing
+        let snapshot = makeSnapshot()
+
+        syncTask = Task {
+            do {
+                let result = try await remoteSync.sync(snapshot: snapshot)
+                await MainActor.run {
+                    applySyncResult(result)
+                    syncTask = nil
+                }
+            } catch {
+                await MainActor.run {
+                    markSyncFailure(error)
+                    syncTask = nil
+                }
+            }
+        }
+
+        await syncTask?.value
+    }
+
+    private func restorePersistedStateIfAvailable() async {
+        do {
+            if let snapshot = try persistence.load() {
+                items = snapshot.items.filter { !$0.isDeleted }
+                locations = snapshot.locations.filter { !$0.isDeleted }
+                pendingMutations = snapshot.pendingMutations
+                syncState = snapshot.syncState
+                lastSuccessfulSyncAt = snapshot.syncState.lastSuccessfulSyncAt
+                pendingChangeCount = snapshot.pendingMutations.count
+
+                if !remoteSync.isEnabled {
+                    syncIndicator = .disabled
+                } else if let error = snapshot.syncState.lastErrorDescription {
+                    syncIndicator = .failed(error)
+                } else {
+                    syncIndicator = .idle
+                }
+            }
+        } catch {
+            syncIndicator = .failed(error.localizedDescription)
+        }
+    }
+
+    private func persistSnapshot() async {
+        do {
+            try persistence.save(makeSnapshot())
+        } catch {
+            syncIndicator = .failed(error.localizedDescription)
+        }
+    }
+
+    private func schedulePersistenceAndSync() {
+        pendingChangeCount = pendingMutations.count
+
+        Task {
+            await persistSnapshot()
+            await syncNow()
+        }
+    }
+
+    private func applySyncResult(_ result: InventorySyncResult) {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            items = result.items
+            locations = result.locations
+        }
+
+        let acknowledgedSet = Set(result.acknowledgedMutationIDs)
+        pendingMutations.removeAll { acknowledgedSet.contains($0.id) }
+        pendingChangeCount = pendingMutations.count
+        syncState.lastSuccessfulSyncAt = result.syncedAt
+        syncState.lastErrorDescription = nil
+        lastSuccessfulSyncAt = result.syncedAt
+        syncIndicator = .idle
+
+        Task {
+            await persistSnapshot()
+        }
+    }
+
+    private func markSyncFailure(_ error: Error) {
+        syncState.lastErrorDescription = error.localizedDescription
+        syncIndicator = .failed(error.localizedDescription)
+        pendingChangeCount = pendingMutations.count
+
+        Task {
+            await persistSnapshot()
+        }
+    }
+
+    private func makeSnapshot() -> InventorySnapshot {
+        InventorySnapshot(
+            items: items,
+            locations: locations,
+            pendingMutations: pendingMutations,
+            syncState: syncState
+        )
+    }
+
+    private func enqueueItemMutation(for item: InventoryItem, operation: InventoryPendingMutation.Operation) {
+        pendingMutations.removeAll {
+            $0.entityType == .item && $0.entityID == item.id
+        }
+        pendingMutations.append(
+            InventoryPendingMutation(
+                entityType: .item,
+                entityID: item.id,
+                operation: operation,
+                item: item
+            )
+        )
+    }
+
+    private func enqueueLocationMutation(for location: InventoryLocationNode, operation: InventoryPendingMutation.Operation) {
+        pendingMutations.removeAll {
+            $0.entityType == .location && $0.entityID == location.id
+        }
+        pendingMutations.append(
+            InventoryPendingMutation(
+                entityType: .location,
+                entityID: location.id,
+                operation: operation,
+                location: location
+            )
+        )
+    }
+
     private func subtreeIDs(startingAt id: UUID) -> Set<UUID> {
         var ids: Set<UUID> = [id]
         var pending: [UUID] = [id]
@@ -241,5 +442,44 @@ final class InventoryStore {
 
     private func localizedCategoryName(for categoryCode: String) -> String {
         InventoryCategory(rawValue: categoryCode)?.localizedTitle ?? categoryCode
+    }
+}
+
+private extension InventoryItem {
+    func withUpdatedTimestamp(_ date: Date = .now) -> InventoryItem {
+        var copy = self
+        copy.updatedAt = date
+        copy.isDeleted = false
+        return copy
+    }
+
+    func markedDeleted(at date: Date) -> InventoryItem {
+        var copy = self
+        copy.isDeleted = true
+        copy.updatedAt = date
+        return copy
+    }
+}
+
+private extension InventoryLocationNode {
+    func withUpdatedTimestamp(_ date: Date = .now) -> InventoryLocationNode {
+        var copy = self
+        copy.updatedAt = date
+        copy.isDeleted = false
+        return copy
+    }
+
+    func renamed(_ name: String) -> InventoryLocationNode {
+        var copy = self
+        copy.name = name
+        copy.updatedAt = .now
+        return copy
+    }
+
+    func markedDeleted(at date: Date) -> InventoryLocationNode {
+        var copy = self
+        copy.isDeleted = true
+        copy.updatedAt = date
+        return copy
     }
 }

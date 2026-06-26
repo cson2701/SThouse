@@ -12,16 +12,25 @@ struct InventoryLocationNode: Identifiable, Equatable, Codable {
     var name: String
     var parentID: UUID?
     var sortOrder: Int
+    var isDeleted: Bool
+    var updatedAt: Date
+    var serverUpdatedAt: Date?
 
     init(
         id: UUID = UUID(),
         name: String,
         parentID: UUID? = nil,
-        sortOrder: Int = 0
+        sortOrder: Int = 0,
+        isDeleted: Bool = false,
+        updatedAt: Date = .now,
+        serverUpdatedAt: Date? = nil
     ) {
         self.id = id
         self.name = name
         self.parentID = parentID
         self.sortOrder = sortOrder
+        self.isDeleted = isDeleted
+        self.updatedAt = updatedAt
+        self.serverUpdatedAt = serverUpdatedAt
     }
 }
