@@ -93,6 +93,11 @@ struct AddItemView: View {
                         decrementQuantity()
                     }
                 }
+
+                if mode == .edit {
+                    Text("\(String(localized: "inventory.field.lastEditedBy")): \(lastEditedByLabel)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)                }
             }
             .navigationTitle(mode.title)
             .toolbar {
@@ -153,6 +158,14 @@ struct AddItemView: View {
         }
 
         return String(localized: "inventory.location.select")
+    }
+
+    private var lastEditedByLabel: String {
+        guard let lastEditedBy = viewModel.lastEditedBy, !lastEditedBy.isEmpty else {
+            return String(localized: "inventory.lastEditedBy.unknown")
+        }
+
+        return lastEditedBy
     }
 
     private func incrementQuantity() {

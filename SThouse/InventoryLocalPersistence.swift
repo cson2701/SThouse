@@ -13,12 +13,14 @@ final class InventoryLocalPersistence {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
-    init(fileManager: FileManager = .default) {
+    init(namespace: String, fileManager: FileManager = .default) {
         let supportDirectory = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
 
-        let directory = supportDirectory.appendingPathComponent("SThouse", isDirectory: true)
+        let directory = supportDirectory
+            .appendingPathComponent("SThouse", isDirectory: true)
+            .appendingPathComponent(namespace, isDirectory: true)
         fileURL = directory.appendingPathComponent("inventory-state.json", isDirectory: false)
 
         let encoder = JSONEncoder()

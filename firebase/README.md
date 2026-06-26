@@ -1,17 +1,33 @@
 # Firebase setup
 
-## Collections
-- `households/{householdId}`
-- `households/{householdId}/items/{itemId}`
-- `households/{householdId}/locations/{locationId}`
+## Console setup
+1. Use the existing Firebase project `974732252826`.
+2. Register the iOS app with bundle ID `scrapps.SThouse`.
+3. Enable Email/Password in Firebase Authentication.
+4. Add `GoogleService-Info.plist` to the Xcode target.
+5. Deploy `firebase/firestore.rules` and `firebase/firestore.indexes.json`.
+
+## Firestore structure
+- `households/shared-household`
+- `households/shared-household/items/{itemId}`
+- `households/shared-household/locations/{locationId}`
+
+All authenticated users share the same household document and subcollections.
 
 ## Required document fields
+
+### Household
+- `ownerUid`
+- `email`
+- `createdAt`
+- `updatedAt`
 
 ### Item
 - `id`
 - `name`
 - `category`
 - `quantity`
+- `lastEditedBy`
 - `locationId`
 - `deleted`
 - `updatedAt`
@@ -26,12 +42,8 @@
 - `updatedAt`
 - `serverUpdatedAt`
 
-## App config
-1. Copy `SThouse/FirebaseConfig.plist.example` to `SThouse/FirebaseConfig.plist`.
-2. Fill in `ProjectID`, `HouseholdID`, and a valid bearer token for development.
-3. Deploy `firebase/firestore.rules` and `firebase/firestore.indexes.json` with Firebase CLI.
-
-## Current sync behavior
-- Local JSON persistence is the app source of truth.
-- Firebase sync is enabled only when `FirebaseConfig.plist` exists.
-- The client currently syncs full `items` and `locations` collections after pushing local mutations.
+## App behavior
+- Email/password auth gates access to the inventory UI.
+- Local JSON persistence remains the source of truth for the UI.
+- Firestore is used for cloud sync after sign-in.
+- All signed-in users share the same cloud dataset and local cache namespace.

@@ -13,6 +13,7 @@ struct InventoryItem: Identifiable, Equatable, Codable {
     var locationID: UUID?
     var category: String
     var quantity: Int
+    var lastEditedBy: String?
     var isDeleted: Bool
     var updatedAt: Date
     var serverUpdatedAt: Date?
@@ -23,6 +24,7 @@ struct InventoryItem: Identifiable, Equatable, Codable {
         locationID: UUID? = nil,
         category: String,
         quantity: Int,
+        lastEditedBy: String? = nil,
         isDeleted: Bool = false,
         updatedAt: Date = .now,
         serverUpdatedAt: Date? = nil
@@ -32,6 +34,7 @@ struct InventoryItem: Identifiable, Equatable, Codable {
         self.locationID = locationID
         self.category = category
         self.quantity = quantity
+        self.lastEditedBy = lastEditedBy
         self.isDeleted = isDeleted
         self.updatedAt = updatedAt
         self.serverUpdatedAt = serverUpdatedAt

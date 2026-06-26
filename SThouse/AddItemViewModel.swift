@@ -55,6 +55,7 @@ final class AddItemViewModel {
     var selectedLocationID: UUID?
     var category: InventoryCategory = .unspecified
     var quantity = 1
+    var lastEditedBy: String?
 
     private let editingItemID: UUID?
 
@@ -65,6 +66,7 @@ final class AddItemViewModel {
             selectedLocationID = item.locationID
             category = InventoryCategory(rawValue: item.category) ?? .unspecified
             quantity = item.quantity
+            lastEditedBy = item.lastEditedBy
         }
     }
 
