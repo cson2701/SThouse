@@ -116,6 +116,7 @@ struct ContentView: View {
                     }
                 }
             }
+            .dismissKeyboardOnTap()
             .navigationTitle("SThouse")
             .searchableIfNeeded(
                 text: $viewModel.searchQuery,
