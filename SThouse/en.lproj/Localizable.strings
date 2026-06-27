@@ -41,7 +41,9 @@
 "inventory.field.category" = "Category";
 "inventory.category.default" = "Default category";
 "inventory.field.quantity" = "Quantity";
+"inventory.field.lastEditedAt" = "Last edited";
 "inventory.field.lastEditedBy" = "Last edited by";
+"inventory.lastEditedAt.unknown" = "Unknown";
 "inventory.lastEditedBy.unknown" = "Unknown";
 "inventory.cancel" = "Cancel";
 "inventory.save" = "Save";
