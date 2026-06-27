@@ -59,7 +59,7 @@ final class AddItemViewModel {
 
     private let editingItemID: UUID?
 
-    init(item: InventoryItem? = nil) {
+    init(item: InventoryItem? = nil, initialLocationID: UUID? = nil) {
         editingItemID = item?.id
         if let item {
             name = item.name
@@ -67,6 +67,8 @@ final class AddItemViewModel {
             category = InventoryCategory(rawValue: item.category) ?? .unspecified
             quantity = item.quantity
             lastEditedBy = item.lastEditedBy
+        } else {
+            selectedLocationID = initialLocationID
         }
     }
 

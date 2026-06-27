@@ -9,6 +9,7 @@
 "inventory.empty.subtitle" = "Add your first household item.";
 "inventory.tree.empty.title" = "No locations yet";
 "inventory.tree.empty.subtitle" = "Create a location tree to start organizing items.";
+"inventory.tree.addItem" = "Add item in this location";
 "inventory.tree.unassigned" = "Unassigned";
 "inventory.tree.unassigned.subtitle" = "Items removed from deleted locations appear here.";
 "inventory.addItem" = "Add Item";

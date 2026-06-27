@@ -41,20 +41,32 @@ struct AddItemView: View {
     let onSave: (InventoryItem) -> Void
     let onDelete: (() -> Void)?
 
-    init(mode: Mode, store: InventoryStore, onSave: @escaping (InventoryItem) -> Void, item: InventoryItem? = nil) {
+    init(
+        mode: Mode,
+        store: InventoryStore,
+        onSave: @escaping (InventoryItem) -> Void,
+        initialLocationID: UUID? = nil,
+        item: InventoryItem? = nil
+    ) {
         self.mode = mode
         self.store = store
         self.onSave = onSave
         self.onDelete = nil
-        _viewModel = State(initialValue: AddItemViewModel(item: item))
+        _viewModel = State(initialValue: AddItemViewModel(item: item, initialLocationID: initialLocationID))
     }
 
-    init(mode: Mode, store: InventoryStore, onSave: @escaping (InventoryItem) -> Void, onDelete: @escaping () -> Void, item: InventoryItem? = nil) {
+    init(
+        mode: Mode,
+        store: InventoryStore,
+        onSave: @escaping (InventoryItem) -> Void,
+        onDelete: @escaping () -> Void,
+        item: InventoryItem? = nil
+    ) {
         self.mode = mode
         self.store = store
         self.onSave = onSave
         self.onDelete = onDelete
-        _viewModel = State(initialValue: AddItemViewModel(item: item))
+        _viewModel = State(initialValue: AddItemViewModel(item: item, initialLocationID: nil))
     }
 
     var body: some View {
