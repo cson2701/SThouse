@@ -9,6 +9,7 @@
 "inventory.empty.subtitle" = "先添加你的第一个家居物品。";
 "inventory.tree.empty.title" = "还没有位置";
 "inventory.tree.empty.subtitle" = "先创建一个位置树，再开始整理物品。";
+"inventory.tree.addItem" = "在此位置添加物品";
 "inventory.tree.unassigned" = "未分配";
 "inventory.tree.unassigned.subtitle" = "从已删除位置移除的物品会显示在这里。";
 "inventory.addItem" = "添加物品";

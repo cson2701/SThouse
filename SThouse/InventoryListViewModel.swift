@@ -13,12 +13,15 @@ import SwiftUI
 @Observable
 final class InventoryListViewModel {
     enum Sheet: Identifiable {
-        case add
+        case add(UUID?)
         case edit(InventoryItem)
 
         var id: String {
             switch self {
-            case .add:
+            case .add(let locationID):
+                if let locationID {
+                    return "add-\(locationID.uuidString)"
+                }
                 return "add"
             case .edit(let item):
                 return "edit-\(item.id.uuidString)"

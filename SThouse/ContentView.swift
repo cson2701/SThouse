@@ -62,59 +62,8 @@ struct ContentView: View {
                     .listRowBackground(Color.clear)
                 }
 
-                Section {
-                    Picker("inventory.view.mode", selection: $displayMode) {
-                        ForEach(DisplayMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                }
-
-                switch displayMode {
-                case .tree:
-                    Section("inventory.section.inventory") {
-                        if viewModel.store.rootLocations.isEmpty && viewModel.store.items.isEmpty {
-                            ContentUnavailableView(
-                                "inventory.tree.empty.title",
-                                systemImage: "tree",
-                                description: Text("inventory.tree.empty.subtitle")
-                            )
-                        } else {
-                            TreeInventoryView(
-                                store: viewModel.store,
-                                onEditItem: { viewModel.activeSheet = .edit($0) },
-                                onDeleteItem: { viewModel.requestDelete($0) }
-                            )
-                        }
-                    }
-                case .list:
-                    Section("inventory.section.inventory") {
-                        if viewModel.filteredItems.isEmpty {
-                            ContentUnavailableView(
-                                viewModel.isShowingSearchResults ? "No matching items" : "inventory.empty.title",
-                                systemImage: viewModel.isShowingSearchResults ? "magnifyingglass" : "shippingbox",
-                                description: viewModel.isShowingSearchResults ? Text("Try a different search term.") : Text("inventory.empty.subtitle")
-                            )
-                        } else {
-                            ForEach(viewModel.filteredItems) { item in
-                                listInventoryRow(for: item)
-                                .transition(.opacity)
-                                .listRowInsets(EdgeInsets())
-                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                    Button {
-                                        viewModel.requestDelete(item)
-                                    } label: {
-                                        Label("inventory.delete", systemImage: "trash")
-                                    }
-                                    .tint(.red)
-                                }
-                            }
-                        }
-                    }
-                }
+                displayModeSection
+                inventorySection
             }
             .dismissKeyboardOnTap()
             .navigationTitle("SThouse")
@@ -162,7 +111,7 @@ struct ContentView: View {
                     }
 
                     Button {
-                        viewModel.activeSheet = .add
+                        viewModel.activeSheet = .add(nil)
                     } label: {
                         Label("inventory.addItem", systemImage: "plus")
                     }
@@ -170,10 +119,10 @@ struct ContentView: View {
             }
             .sheet(item: $viewModel.activeSheet) { sheet in
                 switch sheet {
-                case .add:
-                    AddItemView(mode: .add, store: viewModel.store) { newItem in
+                case .add(let locationID):
+                    AddItemView(mode: .add, store: viewModel.store, onSave: { newItem in
                         viewModel.addItem(newItem)
-                    }
+                    }, initialLocationID: locationID)
                 case .edit(let item):
                     AddItemView(mode: .edit, store: viewModel.store, onSave: { updatedItem in
                         viewModel.updateItem(updatedItem)
@@ -201,6 +150,71 @@ struct ContentView: View {
                 Text(verbatim: String(format: String(localized: "inventory.delete.confirmation.message"), item.name))
             }
         }
+    }
+
+    @ViewBuilder
+    private var displayModeSection: some View {
+        Section {
+            Picker("inventory.view.mode", selection: $displayMode) {
+                ForEach(DisplayMode.allCases) { mode in
+                    displayModeLabel(for: mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    @ViewBuilder
+    private var inventorySection: some View {
+        switch displayMode {
+        case .tree:
+            Section("inventory.section.inventory") {
+                if viewModel.store.rootLocations.isEmpty && viewModel.store.items.isEmpty {
+                    ContentUnavailableView(
+                        "inventory.tree.empty.title",
+                        systemImage: "tree",
+                        description: Text("inventory.tree.empty.subtitle")
+                    )
+                } else {
+                    TreeInventoryView(
+                        store: viewModel.store,
+                        onAddItemAtLocation: { viewModel.activeSheet = .add($0) },
+                        onEditItem: { viewModel.activeSheet = .edit($0) },
+                        onDeleteItem: { viewModel.requestDelete($0) }
+                    )
+                }
+            }
+        case .list:
+            Section("inventory.section.inventory") {
+                if viewModel.filteredItems.isEmpty {
+                    ContentUnavailableView(
+                        viewModel.isShowingSearchResults ? "No matching items" : "inventory.empty.title",
+                        systemImage: viewModel.isShowingSearchResults ? "magnifyingglass" : "shippingbox",
+                        description: viewModel.isShowingSearchResults ? Text("Try a different search term.") : Text("inventory.empty.subtitle")
+                    )
+                } else {
+                    ForEach(viewModel.filteredItems) { item in
+                        listInventoryRow(for: item)
+                        .transition(.opacity)
+                        .listRowInsets(EdgeInsets())
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button {
+                                viewModel.requestDelete(item)
+                            } label: {
+                                Label("inventory.delete", systemImage: "trash")
+                            }
+                            .tint(.red)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func displayModeLabel(for mode: DisplayMode) -> some View {
+        Text(mode.title).tag(mode)
     }
 
     @ViewBuilder
@@ -366,6 +380,7 @@ private struct SyncStatusCard: View {
 
 private struct TreeInventoryView: View {
     let store: InventoryStore
+    let onAddItemAtLocation: (UUID) -> Void
     let onEditItem: (InventoryItem) -> Void
     let onDeleteItem: (InventoryItem) -> Void
 
@@ -401,6 +416,7 @@ private struct TreeInventoryView: View {
                     store: store,
                     location: location,
                     expandedLocationIDs: $expandedLocationIDs,
+                    onAddItem: onAddItemAtLocation,
                     onEditItem: onEditItem,
                     onDeleteItem: onDeleteItem
                 )
@@ -418,6 +434,7 @@ private struct InventoryLocationTreeNode: View {
     let store: InventoryStore
     let location: InventoryLocationNode
     @Binding var expandedLocationIDs: Set<UUID>
+    let onAddItem: (UUID) -> Void
     let onEditItem: (InventoryItem) -> Void
     let onDeleteItem: (InventoryItem) -> Void
 
@@ -433,6 +450,9 @@ private struct InventoryLocationTreeNode: View {
             count: totalCount,
             isExpanded: isExpanded,
             indentation: 0,
+            onContextAdd: {
+                onAddItem(location.id)
+            },
             onToggle: {
                 if isExpanded {
                     expandedLocationIDs.remove(location.id)
@@ -456,6 +476,7 @@ private struct InventoryLocationTreeNode: View {
                         store: store,
                         location: child,
                         expandedLocationIDs: $expandedLocationIDs,
+                        onAddItem: onAddItem,
                         onEditItem: onEditItem,
                         onDeleteItem: onDeleteItem
                     )
@@ -472,42 +493,75 @@ private struct TreeNodeSection<Content: View>: View {
     let count: Int
     let isExpanded: Bool
     var indentation: CGFloat = 0
+    var onContextAdd: (() -> Void)? = nil
     var onToggle: (() -> Void)? = nil
     @ViewBuilder let content: () -> Content
+    @State private var isPressed = false
+    @State private var isShowingMenu = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Button {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline)
+
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                Text("\(count)")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.thinMaterial, in: Capsule())
+            }
+            .contentShape(Rectangle())
+            .scaleEffect(isPressed ? 1.02 : 1.0)
+            .animation(.easeOut(duration: 0.14), value: isPressed)
+            .onTapGesture {
                 onToggle?()
-            } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 16)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(title)
-                            .font(.headline)
-
-                        if let subtitle {
-                            Text(subtitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+            }
+            .onLongPressGesture(
+                minimumDuration: 0.35,
+                pressing: { pressing in
+                    withAnimation(.easeOut(duration: 0.14)) {
+                        isPressed = pressing
+                    }
+                },
+                perform: {
+                    guard onContextAdd != nil else {
+                        return
                     }
 
-                    Spacer(minLength: 8)
-
-                    Text("\(count)")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.thinMaterial, in: Capsule())
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    isPressed = false
+                    isShowingMenu = true
                 }
-                .contentShape(Rectangle())
+            )
+            .confirmationDialog(
+                "",
+                isPresented: $isShowingMenu,
+                titleVisibility: .hidden
+            ) {
+                if let onContextAdd {
+                    Button {
+                        onContextAdd()
+                    } label: {
+                        Label("inventory.addItem", systemImage: "plus")
+                    }
+                }
             }
-            .buttonStyle(.plain)
 
             content()
         }
