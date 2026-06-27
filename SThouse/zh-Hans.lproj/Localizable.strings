@@ -41,6 +41,10 @@
 "inventory.field.category" = "类别";
 "inventory.category.default" = "默认类别";
 "inventory.field.quantity" = "数量";
+"inventory.field.lastEditedAt" = "最后编辑时间";
+"inventory.field.lastEditedBy" = "最后编辑者";
+"inventory.lastEditedAt.unknown" = "未知";
+"inventory.lastEditedBy.unknown" = "未知";
 "inventory.cancel" = "取消";
 "inventory.save" = "保存";
 "inventory.update" = "更新";

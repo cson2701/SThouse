@@ -107,9 +107,10 @@ struct AddItemView: View {
                 }
 
                 if mode == .edit {
-                    Text("\(String(localized: "inventory.field.lastEditedBy")): \(lastEditedByLabel)")
+                    Text("\(String(localized: "inventory.field.lastEditedAt")): \(lastEditedAtLabel)\n\(String(localized: "inventory.field.lastEditedBy")): \(lastEditedByLabel)")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)                }
+                        .foregroundStyle(.secondary)
+                }
             }
             .dismissKeyboardOnTap()
             .navigationTitle(mode.title)
@@ -179,6 +180,14 @@ struct AddItemView: View {
         }
 
         return lastEditedBy
+    }
+
+    private var lastEditedAtLabel: String {
+        guard let lastEditedAt = viewModel.lastEditedAt else {
+            return String(localized: "inventory.lastEditedAt.unknown")
+        }
+
+        return lastEditedAt.formatted(date: .abbreviated, time: .shortened)
     }
 
     private func incrementQuantity() {
