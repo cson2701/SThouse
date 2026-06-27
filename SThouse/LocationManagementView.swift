@@ -45,6 +45,7 @@ struct LocationManagementView: View {
                 }
                 .padding()
             }
+            .dismissKeyboardOnTap()
             .navigationTitle("inventory.location.manage")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -185,6 +186,7 @@ private struct LocationEditorSheet: View {
                     footerText
                 }
             }
+            .dismissKeyboardOnTap()
             .navigationTitle(sheetTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

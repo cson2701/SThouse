@@ -122,6 +122,7 @@ private struct EmailPasswordAuthView: View {
                     }
                 }
             }
+            .dismissKeyboardOnTap()
             .navigationTitle("SThouse")
             .overlay {
                 if authSession.isSubmitting {

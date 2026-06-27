@@ -99,6 +99,7 @@ struct AddItemView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)                }
             }
+            .dismissKeyboardOnTap()
             .navigationTitle(mode.title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
