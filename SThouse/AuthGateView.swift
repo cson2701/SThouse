@@ -97,7 +97,20 @@ private struct EmailPasswordAuthView: View {
                             await authSession.signInWithGoogle()
                         }
                     } label: {
-                        Label("Continue with Google", systemImage: "globe")
+                        HStack {
+                            Spacer(minLength: 0)
+
+                            HStack(spacing: 10) {
+                                Image("GoogleLogo")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 18, height: 18)
+
+                                Text("Continue with Google")
+                            }
+
+                            Spacer(minLength: 0)
+                        }
                     }
                     .disabled(authSession.isSubmitting)
                 }
