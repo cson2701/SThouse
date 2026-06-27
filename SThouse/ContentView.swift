@@ -34,6 +34,8 @@ struct ContentView: View {
     @State private var displayMode: DisplayMode = .tree
     @State private var isSearchBarVisible = false
     @State private var searchBarVisibilityTask: Task<Void, Never>?
+    @State private var expandedLocationIDs: Set<UUID> = []
+    @State private var isUnassignedExpanded = true
 
     var body: some View {
         NavigationStack {
@@ -87,6 +89,9 @@ struct ContentView: View {
                     await viewModel.syncNow()
                 }
             }
+            .onChange(of: viewModel.store.locations) { _, locations in
+                pruneExpandedLocationState(using: locations)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
@@ -138,7 +143,7 @@ struct ContentView: View {
                 "inventory.delete.confirmation.title",
                 isPresented: $viewModel.isShowingDeleteConfirmation,
                 presenting: viewModel.pendingDeleteItem
-            ) { item in
+            ) { _ in
                 Button("inventory.delete", role: .destructive) {
                     viewModel.confirmDelete()
                 }
@@ -180,6 +185,8 @@ struct ContentView: View {
                 } else {
                     TreeInventoryView(
                         store: viewModel.store,
+                        expandedLocationIDs: $expandedLocationIDs,
+                        isUnassignedExpanded: $isUnassignedExpanded,
                         onAddItemAtLocation: { viewModel.activeSheet = .add($0) },
                         onEditItem: { viewModel.activeSheet = .edit($0) },
                         onDeleteItem: { viewModel.requestDelete($0) }
@@ -197,16 +204,16 @@ struct ContentView: View {
                 } else {
                     ForEach(viewModel.filteredItems) { item in
                         listInventoryRow(for: item)
-                        .transition(.opacity)
-                        .listRowInsets(EdgeInsets())
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button {
-                                viewModel.requestDelete(item)
-                            } label: {
-                                Label("inventory.delete", systemImage: "trash")
+                            .transition(.opacity)
+                            .listRowInsets(EdgeInsets())
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button {
+                                    viewModel.requestDelete(item)
+                                } label: {
+                                    Label("inventory.delete", systemImage: "trash")
+                                }
+                                .tint(.red)
                             }
-                            .tint(.red)
-                        }
                     }
                 }
             }
@@ -287,6 +294,11 @@ struct ContentView: View {
 
             isSearchBarVisible = true
         }
+    }
+
+    private func pruneExpandedLocationState(using locations: [InventoryLocationNode]) {
+        let validIDs = Set(locations.map(\.id))
+        expandedLocationIDs.formIntersection(validIDs)
     }
 }
 
@@ -380,12 +392,11 @@ private struct SyncStatusCard: View {
 
 private struct TreeInventoryView: View {
     let store: InventoryStore
+    @Binding var expandedLocationIDs: Set<UUID>
+    @Binding var isUnassignedExpanded: Bool
     let onAddItemAtLocation: (UUID) -> Void
     let onEditItem: (InventoryItem) -> Void
     let onDeleteItem: (InventoryItem) -> Void
-
-    @State private var expandedLocationIDs: Set<UUID> = []
-    @State private var isUnassignedExpanded = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
