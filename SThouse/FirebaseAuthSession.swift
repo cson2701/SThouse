@@ -124,11 +124,11 @@ private enum GoogleSignInError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingClientID:
-            return "Google Sign-In is not configured correctly for this app."
+            return String(localized: "auth.error.google.missingClientID")
         case .missingPresentingViewController:
-            return "Unable to present Google Sign-In."
+            return String(localized: "auth.error.google.missingPresenter")
         case .missingIDToken:
-            return "Google Sign-In did not return an ID token."
+            return String(localized: "auth.error.google.missingIDToken")
         }
     }
 }
