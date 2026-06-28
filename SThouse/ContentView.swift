@@ -34,8 +34,6 @@ struct ContentView: View {
     @State private var displayMode: DisplayMode = .tree
     @State private var isSearchBarVisible = false
     @State private var searchBarVisibilityTask: Task<Void, Never>?
-    @State private var expandedLocationIDs: Set<UUID> = []
-    @State private var isUnassignedExpanded = true
 
     var body: some View {
         NavigationStack {
@@ -88,9 +86,6 @@ struct ContentView: View {
                 Task {
                     await viewModel.syncNow()
                 }
-            }
-            .onChange(of: viewModel.store.locations) { _, locations in
-                pruneExpandedLocationState(using: locations)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -185,8 +180,6 @@ struct ContentView: View {
                 } else {
                     TreeInventoryView(
                         store: viewModel.store,
-                        expandedLocationIDs: $expandedLocationIDs,
-                        isUnassignedExpanded: $isUnassignedExpanded,
                         onAddItemAtLocation: { viewModel.activeSheet = .add($0) },
                         onEditItem: { viewModel.activeSheet = .edit($0) },
                         onDeleteItem: { viewModel.requestDelete($0) }
@@ -295,11 +288,6 @@ struct ContentView: View {
             isSearchBarVisible = true
         }
     }
-
-    private func pruneExpandedLocationState(using locations: [InventoryLocationNode]) {
-        let validIDs = Set(locations.map(\.id))
-        expandedLocationIDs.formIntersection(validIDs)
-    }
 }
 
 private struct SummaryCard: View {
@@ -395,262 +383,231 @@ private struct SyncStatusCard: View {
 
 private struct TreeInventoryView: View {
     let store: InventoryStore
-    @Binding var expandedLocationIDs: Set<UUID>
-    @Binding var isUnassignedExpanded: Bool
     let onAddItemAtLocation: (UUID) -> Void
     let onEditItem: (InventoryItem) -> Void
     let onDeleteItem: (InventoryItem) -> Void
+    @State private var expandedRowIDs: Set<String> = ["unassigned"]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if !orphanItems.isEmpty {
-                TreeNodeSection(
-                    title: String(localized: "inventory.tree.unassigned"),
-                    subtitle: String(localized: "inventory.tree.unassigned.subtitle"),
-                    count: orphanItems.count,
-                    isExpanded: isUnassignedExpanded,
-                    onToggle: {
-                        isUnassignedExpanded.toggle()
-                    }
-                ) {
-                    if isUnassignedExpanded {
-                        ForEach(orphanItems) { item in
-                            InventoryLeafContextRow(item: item) {
-                                onEditItem(item)
-                            } onDelete: {
-                                onDeleteItem(item)
-                            }
-                        }
-                    }
-                }
-            }
-
-            ForEach(store.rootLocations) { location in
-                InventoryLocationTreeNode(
-                    store: store,
-                    location: location,
-                    expandedLocationIDs: $expandedLocationIDs,
-                    onAddItem: onAddItemAtLocation,
-                    onEditItem: onEditItem,
-                    onDeleteItem: onDeleteItem
-                )
-            }
+        ForEach(treeRows) { row in
+            TreeInventoryRow(
+                row: row,
+                expandedRowIDs: $expandedRowIDs,
+                onAddItemAtLocation: onAddItemAtLocation,
+                onEditItem: onEditItem,
+                onDeleteItem: onDeleteItem
+            )
         }
-        .padding(.top, 4)
+        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
     }
 
     private var orphanItems: [InventoryItem] {
         store.items(at: nil)
     }
+
+    private var treeRows: [TreeInventoryRowModel] {
+        var rows = store.rootLocations.map(makeLocationRow)
+
+        if !orphanItems.isEmpty {
+            rows.insert(
+                .unassigned(
+                    title: String(localized: "inventory.tree.unassigned"),
+                    subtitle: String(localized: "inventory.tree.unassigned.subtitle"),
+                    count: orphanItems.count,
+                    children: orphanItems.map(TreeInventoryRowModel.item)
+                ),
+                at: 0
+            )
+        }
+
+        return rows
+    }
+
+    private func makeLocationRow(_ location: InventoryLocationNode) -> TreeInventoryRowModel {
+        let childLocations = store.children(of: location.id).map(makeLocationRow)
+        let directItems = store.items(at: location.id).map(TreeInventoryRowModel.item)
+
+        return .location(
+            location,
+            subtitle: location.parentID == nil ? nil : store.locationPathDescription(for: location.id),
+            count: store.totalItemCount(in: location.id),
+            children: childLocations + directItems
+        )
+    }
 }
 
-private struct InventoryLocationTreeNode: View {
-    let store: InventoryStore
-    let location: InventoryLocationNode
-    @Binding var expandedLocationIDs: Set<UUID>
-    let onAddItem: (UUID) -> Void
+private enum TreeInventoryRowModel: Identifiable {
+    case location(InventoryLocationNode, subtitle: String?, count: Int, children: [TreeInventoryRowModel])
+    case item(InventoryItem)
+    case unassigned(title: String, subtitle: String, count: Int, children: [TreeInventoryRowModel])
+
+    var id: String {
+        switch self {
+        case .location(let location, _, _, _):
+            return "location-\(location.id.uuidString)"
+        case .item(let item):
+            return "item-\(item.id.uuidString)"
+        case .unassigned:
+            return "unassigned"
+        }
+    }
+
+    var children: [TreeInventoryRowModel]? {
+        switch self {
+        case .location(_, _, _, let children), .unassigned(_, _, _, let children):
+            children.isEmpty ? nil : children
+        case .item:
+            nil
+        }
+    }
+}
+
+private struct TreeInventoryRow: View {
+    let row: TreeInventoryRowModel
+    @Binding var expandedRowIDs: Set<String>
+    let onAddItemAtLocation: (UUID) -> Void
     let onEditItem: (InventoryItem) -> Void
     let onDeleteItem: (InventoryItem) -> Void
+    @State private var isShowingMenu = false
 
     var body: some View {
-        let directItems = store.items(at: location.id)
-        let children = store.children(of: location.id)
-        let totalCount = store.totalItemCount(in: location.id)
-        let isExpanded = expandedLocationIDs.contains(location.id)
-
-        TreeNodeSection(
-            title: location.name,
-            subtitle: location.parentID == nil ? nil : store.locationPathDescription(for: location.id),
-            count: totalCount,
-            isExpanded: isExpanded,
-            indentation: 0,
-            onContextAdd: {
-                onAddItem(location.id)
-            },
-            onToggle: {
-                if isExpanded {
-                    expandedLocationIDs.remove(location.id)
-                } else {
-                    expandedLocationIDs.insert(location.id)
-                }
-            }
-        ) {
-            if isExpanded {
-                ForEach(directItems) { item in
-                    InventoryLeafContextRow(item: item) {
-                        onEditItem(item)
-                    } onDelete: {
-                        onDeleteItem(item)
-                    }
-                    .padding(.leading, 28)
-                }
-
+        switch row {
+        case .location(let location, let subtitle, let count, let children):
+            DisclosureGroup(isExpanded: expansionBinding(for: row.id)) {
                 ForEach(children) { child in
-                    InventoryLocationTreeNode(
-                        store: store,
-                        location: child,
-                        expandedLocationIDs: $expandedLocationIDs,
-                        onAddItem: onAddItem,
+                    TreeInventoryRow(
+                        row: child,
+                        expandedRowIDs: $expandedRowIDs,
+                        onAddItemAtLocation: onAddItemAtLocation,
                         onEditItem: onEditItem,
                         onDeleteItem: onDeleteItem
                     )
-                    .padding(.leading, 18)
                 }
-            }
-        }
-    }
-}
-
-private struct TreeNodeSection<Content: View>: View {
-    let title: String
-    let subtitle: String?
-    let count: Int
-    let isExpanded: Bool
-    var indentation: CGFloat = 0
-    var onContextAdd: (() -> Void)? = nil
-    var onToggle: (() -> Void)? = nil
-    @ViewBuilder let content: () -> Content
-    @State private var isPressed = false
-    @State private var isShowingMenu = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.headline)
-
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+            } label: {
+                rowLabel(
+                    icon: location.parentID == nil ? "door.left.hand.open" : "cabinet.fill",
+                    title: location.name,
+                    subtitle: subtitle,
+                    trailingText: "\(count)"
+                )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    toggleExpansion(for: row.id)
                 }
-
-                Spacer(minLength: 8)
-
-                Text("\(count)")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.thinMaterial, in: Capsule())
-            }
-            .contentShape(Rectangle())
-            .scaleEffect(isPressed ? 1.02 : 1.0)
-            .animation(.easeOut(duration: 0.14), value: isPressed)
-            .onTapGesture {
-                onToggle?()
-            }
-            .onLongPressGesture(
-                minimumDuration: 0.35,
-                pressing: { pressing in
-                    withAnimation(.easeOut(duration: 0.14)) {
-                        isPressed = pressing
-                    }
-                },
-                perform: {
-                    guard onContextAdd != nil else {
-                        return
-                    }
-
+                .onLongPressGesture(minimumDuration: 0.35) {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    isPressed = false
                     isShowingMenu = true
                 }
-            )
-            .confirmationDialog(
-                "",
-                isPresented: $isShowingMenu,
-                titleVisibility: .hidden
-            ) {
-                if let onContextAdd {
-                    Button {
-                        onContextAdd()
-                    } label: {
-                        Label("inventory.addItem", systemImage: "plus")
-                    }
+            }
+            .confirmationDialog("", isPresented: $isShowingMenu, titleVisibility: .hidden) {
+                Button {
+                    onAddItemAtLocation(location.id)
+                } label: {
+                    Label("inventory.addItem", systemImage: "plus")
                 }
             }
+        case .item(let item):
+            rowLabel(
+                icon: "shippingbox.fill",
+                title: item.name,
+                subtitle: localizedCategoryName(for: item.category),
+                trailingText: "x\(item.quantity)"
+            )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onEditItem(item)
+            }
+            .onLongPressGesture(minimumDuration: 0.35) {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                isShowingMenu = true
+            }
+            .confirmationDialog("", isPresented: $isShowingMenu, titleVisibility: .hidden) {
+                Button {
+                    onEditItem(item)
+                } label: {
+                    Label("inventory.editItem", systemImage: "pencil")
+                }
 
-            content()
+                Button(role: .destructive) {
+                    onDeleteItem(item)
+                } label: {
+                    Label("inventory.delete", systemImage: "trash")
+                }
+            }
+        case .unassigned(let title, let subtitle, let count, let children):
+            DisclosureGroup(isExpanded: expansionBinding(for: row.id)) {
+                ForEach(children) { child in
+                    TreeInventoryRow(
+                        row: child,
+                        expandedRowIDs: $expandedRowIDs,
+                        onAddItemAtLocation: onAddItemAtLocation,
+                        onEditItem: onEditItem,
+                        onDeleteItem: onDeleteItem
+                    )
+                }
+            } label: {
+                rowLabel(
+                    icon: "tray.full.fill",
+                    title: title,
+                    subtitle: subtitle,
+                    trailingText: "\(count)"
+                )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    toggleExpansion(for: row.id)
+                }
+            }
         }
-        .padding(14)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
-}
 
-private struct InventoryLeafContextRow: View {
-    let item: InventoryItem
-    let onEdit: () -> Void
-    let onDelete: () -> Void
-    @State private var isPressed = false
-    @State private var isShowingMenu = false
+    private func expansionBinding(for rowID: String) -> Binding<Bool> {
+        Binding(
+            get: {
+                expandedRowIDs.contains(rowID)
+            },
+            set: { isExpanded in
+                if isExpanded {
+                    expandedRowIDs.insert(rowID)
+                } else {
+                    expandedRowIDs.remove(rowID)
+                }
+            }
+        )
+    }
 
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Image(systemName: "shippingbox.fill")
+    private func toggleExpansion(for rowID: String) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            if expandedRowIDs.contains(rowID) {
+                expandedRowIDs.remove(rowID)
+            } else {
+                expandedRowIDs.insert(rowID)
+            }
+        }
+    }
+
+    private func rowLabel(icon: String, title: String, subtitle: String?, trailingText: String) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: icon)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 16)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.name)
+                Text(title)
                     .font(.body)
 
-                Text(localizedCategoryName(for: item.category))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Spacer(minLength: 12)
 
-            Text("x\(item.quantity)")
+            Text(trailingText)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 4)
-        .padding(.horizontal, 10)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .contentShape(Rectangle())
-        .scaleEffect(isPressed ? 1.03 : 1.0)
-        .shadow(color: .black.opacity(isPressed ? 0.12 : 0), radius: isPressed ? 10 : 0, y: isPressed ? 4 : 0)
-        .animation(.easeOut(duration: 0.14), value: isPressed)
-        .onTapGesture(perform: onEdit)
-        .onLongPressGesture(
-            minimumDuration: 0.35,
-            pressing: { pressing in
-                withAnimation(.easeOut(duration: 0.14)) {
-                    isPressed = pressing
-                }
-            },
-            perform: {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                isPressed = false
-                isShowingMenu = true
-            }
-        )
-        .confirmationDialog(
-            "",
-            isPresented: $isShowingMenu,
-            titleVisibility: .hidden
-        ) {
-            Button {
-                onEdit()
-            } label: {
-                Label("inventory.editItem", systemImage: "pencil")
-            }
-
-            Button(role: .destructive) {
-                onDelete()
-            } label: {
-                Label("inventory.delete", systemImage: "trash")
-            }
         }
     }
 
