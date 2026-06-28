@@ -147,11 +147,11 @@ enum FirebaseSyncError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unauthenticated:
-            return "Sign in to enable cloud sync."
+            return String(localized: "inventory.sync.detail.disabled")
         case .invalidItemDocument(let id):
-            return "Invalid item document \(id)."
+            return String.localizedStringWithFormat(String(localized: "inventory.sync.error.invalidItem"), id)
         case .invalidLocationDocument(let id):
-            return "Invalid location document \(id)."
+            return String.localizedStringWithFormat(String(localized: "inventory.sync.error.invalidLocation"), id)
         }
     }
 }

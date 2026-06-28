@@ -72,13 +72,13 @@ enum InventorySyncIndicator: Equatable {
     var title: String {
         switch self {
         case .disabled:
-            return "Offline only"
+            return String(localized: "inventory.sync.status.offlineOnly")
         case .idle:
-            return "Synced"
+            return String(localized: "inventory.sync.status.synced")
         case .syncing:
-            return "Syncing"
+            return String(localized: "inventory.sync.status.syncing")
         case .failed:
-            return "Sync failed"
+            return String(localized: "inventory.sync.status.failed")
         }
     }
 
@@ -107,4 +107,3 @@ protocol InventoryRemoteSyncing {
     var isEnabled: Bool { get }
     func sync(snapshot: InventorySnapshot) async throws -> InventorySyncResult
 }
-

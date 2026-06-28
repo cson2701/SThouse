@@ -68,11 +68,11 @@ struct ContentView: View {
                 inventorySection
             }
             .dismissKeyboardOnTap()
-            .navigationTitle("SThouse")
+            .navigationTitle("app.name")
             .searchableIfNeeded(
                 text: $viewModel.searchQuery,
                 isEnabled: isSearchBarVisible && displayMode == .list,
-                prompt: "Search items"
+                prompt: "inventory.search.prompt"
             )
             .onAppear {
                 updateSearchBarVisibility(for: displayMode)
@@ -99,7 +99,7 @@ struct ContentView: View {
                             Text(authSession.userEmail)
                         }
 
-                        Button("Sign out", role: .destructive) {
+                        Button("auth.action.signOut", role: .destructive) {
                             authSession.signOut()
                         }
                     } label: {
@@ -197,9 +197,9 @@ struct ContentView: View {
             Section("inventory.section.inventory") {
                 if viewModel.filteredItems.isEmpty {
                     ContentUnavailableView(
-                        viewModel.isShowingSearchResults ? "No matching items" : "inventory.empty.title",
+                        viewModel.isShowingSearchResults ? "inventory.search.empty.title" : "inventory.empty.title",
                         systemImage: viewModel.isShowingSearchResults ? "magnifyingglass" : "shippingbox",
-                        description: viewModel.isShowingSearchResults ? Text("Try a different search term.") : Text("inventory.empty.subtitle")
+                        description: viewModel.isShowingSearchResults ? Text("inventory.search.empty.subtitle") : Text("inventory.empty.subtitle")
                     )
                 } else {
                     ForEach(viewModel.filteredItems) { item in
@@ -344,13 +344,13 @@ private struct SyncStatusCard: View {
 
                 Spacer(minLength: 12)
 
-                Button("Sync", action: onSync)
+                Button("inventory.sync.action", action: onSync)
                     .buttonStyle(.borderedProminent)
                     .disabled(indicator == .syncing || indicator == .disabled)
             }
 
             if pendingChangeCount > 0 {
-                Text("\(pendingChangeCount) pending local change\(pendingChangeCount == 1 ? "" : "s")")
+                Text(String.localizedStringWithFormat(String(localized: "inventory.sync.pendingChanges"), pendingChangeCount))
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
             }
@@ -363,14 +363,17 @@ private struct SyncStatusCard: View {
     private var detailText: String {
         switch indicator {
         case .disabled:
-            return "Sign in to enable cloud sync."
+            return String(localized: "inventory.sync.detail.disabled")
         case .idle:
             if let lastSuccessfulSyncAt {
-                return "Last sync \(lastSuccessfulSyncAt.formatted(date: .abbreviated, time: .shortened))"
+                return String.localizedStringWithFormat(
+                    String(localized: "inventory.sync.detail.lastSync"),
+                    lastSuccessfulSyncAt.formatted(date: .abbreviated, time: .shortened)
+                )
             }
-            return "Local data is ready."
+            return String(localized: "inventory.sync.detail.ready")
         case .syncing:
-            return "Pushing local changes and fetching the latest inventory."
+            return String(localized: "inventory.sync.detail.syncing")
         case .failed(let message):
             return message
         }

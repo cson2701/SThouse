@@ -13,7 +13,7 @@ struct AuthGateView: View {
     var body: some View {
         Group {
             if authSession.isResolvingAuthState {
-                ProgressView("Checking account…")
+                ProgressView("auth.loading.checkingAccount")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if authSession.isAuthenticated {
                 ContentView(authSession: authSession)
@@ -34,18 +34,18 @@ private struct EmailPasswordAuthView: View {
         var title: String {
             switch self {
             case .signIn:
-                return "Sign in"
+                return String(localized: "auth.mode.signIn")
             case .register:
-                return "Create account"
+                return String(localized: "auth.mode.createAccount")
             }
         }
 
         var actionTitle: String {
             switch self {
             case .signIn:
-                return "Sign in"
+                return String(localized: "auth.action.signIn")
             case .register:
-                return "Create account"
+                return String(localized: "auth.action.createAccount")
             }
         }
     }
@@ -60,7 +60,7 @@ private struct EmailPasswordAuthView: View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("Mode", selection: $mode) {
+                    Picker("auth.field.mode", selection: $mode) {
                         ForEach(Mode.allCases) { mode in
                             Text(mode.title).tag(mode)
                         }
@@ -68,13 +68,13 @@ private struct EmailPasswordAuthView: View {
                     .pickerStyle(.segmented)
                 }
 
-                Section("Account") {
-                    TextField("Email", text: $email)
+                Section("auth.section.account") {
+                    TextField("auth.field.email", text: $email)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.emailAddress)
                         .autocorrectionDisabled()
 
-                    SecureField("Password", text: $password)
+                    SecureField("auth.field.password", text: $password)
                 }
 
                 Section {
@@ -106,7 +106,7 @@ private struct EmailPasswordAuthView: View {
                                     .scaledToFit()
                                     .frame(width: 18, height: 18)
 
-                                Text("Continue with Google")
+                                Text("auth.action.continueWithGoogle")
                             }
 
                             Spacer(minLength: 0)
@@ -116,14 +116,14 @@ private struct EmailPasswordAuthView: View {
                 }
 
                 if let errorMessage = authSession.errorMessage {
-                    Section("Error") {
+                    Section("auth.section.error") {
                         Text(errorMessage)
                             .foregroundStyle(.red)
                     }
                 }
             }
             .dismissKeyboardOnTap()
-            .navigationTitle("SThouse")
+            .navigationTitle("app.name")
             .overlay {
                 if authSession.isSubmitting {
                     ProgressView()
