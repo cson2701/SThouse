@@ -35,42 +35,20 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                displayModeHeader
-                    .padding(.horizontal, Layout.displayModeHorizontalPadding)
-                    .padding(.top, Layout.displayModeTopPadding)
-                    .padding(.bottom, Layout.displayModeBottomPadding)
+            ZStack {
+                inventoryList(for: .tree)
+                    .opacity(displayMode == .tree ? 1 : 0)
+                    .allowsHitTesting(displayMode == .tree)
+                    .accessibilityHidden(displayMode != .tree)
 
-                List {
-                    Section {
-                        HStack(spacing: 16) {
-                            SummaryCard(title: "inventory.summary.itemTypes", value: "\(viewModel.itemCount)")
-                            SummaryCard(title: "inventory.summary.totalQuantity", value: "\(viewModel.totalQuantity)")
-                        }
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                    }
-
-                    Section {
-                        SyncStatusCard(
-                            indicator: viewModel.syncIndicator,
-                            pendingChangeCount: viewModel.pendingChangeCount,
-                            lastSuccessfulSyncAt: viewModel.lastSuccessfulSyncAt,
-                            onSync: {
-                                Task {
-                                    await viewModel.syncNow()
-                                }
-                            }
-                        )
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                    }
-
-                    inventorySection
-                }
+                inventoryList(for: .list)
+                    .opacity(displayMode == .list ? 1 : 0)
+                    .allowsHitTesting(displayMode == .list)
+                    .accessibilityHidden(displayMode != .list)
             }
             .dismissKeyboardOnTap()
             .navigationTitle("app.name")
+            .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $viewModel.searchQuery, prompt: "inventory.search.prompt")
             .onChange(of: scenePhase) { _, newPhase in
                 guard newPhase == .active else {
@@ -94,6 +72,10 @@ struct ContentView: View {
                     } label: {
                         Image(systemName: "person.crop.circle")
                     }
+                }
+
+                ToolbarItem(placement: .principal) {
+                    displayModeNavigationControl
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -146,9 +128,56 @@ struct ContentView: View {
         }
     }
 
+    private var displayModeNavigationControl: some View {
+        Picker("inventory.view.mode", selection: $displayMode) {
+            ForEach(DisplayMode.allCases) { mode in
+                Text(mode.title).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+            .frame(maxWidth: Layout.displayModeControlMaxWidth)
+    }
+
+    private func inventoryList(for mode: DisplayMode) -> some View {
+        List {
+            summarySection
+            syncSection
+            inventorySection(for: mode)
+        }
+    }
+
+    private var summarySection: some View {
+        Section {
+            HStack(spacing: 16) {
+                SummaryCard(title: "inventory.summary.itemTypes", value: "\(viewModel.itemCount)")
+                SummaryCard(title: "inventory.summary.totalQuantity", value: "\(viewModel.totalQuantity)")
+            }
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    private var syncSection: some View {
+        Section {
+            SyncStatusCard(
+                indicator: viewModel.syncIndicator,
+                pendingChangeCount: viewModel.pendingChangeCount,
+                lastSuccessfulSyncAt: viewModel.lastSuccessfulSyncAt,
+                onSync: {
+                    Task {
+                        await viewModel.syncNow()
+                    }
+                }
+            )
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+        }
+    }
+
     @ViewBuilder
-    private var inventorySection: some View {
-        switch displayMode {
+    private func inventorySection(for mode: DisplayMode) -> some View {
+        switch mode {
         case .tree:
             Section("inventory.section.inventory") {
                 if viewModel.store.rootLocations.isEmpty && viewModel.store.items.isEmpty {
@@ -191,19 +220,6 @@ struct ContentView: View {
                 }
             }
         }
-    }
-
-    private var displayModeHeader: some View {
-        Picker("inventory.view.mode", selection: $displayMode) {
-            ForEach(DisplayMode.allCases) { mode in
-                displayModeLabel(for: mode)
-            }
-        }
-        .pickerStyle(.segmented)
-    }
-
-    private func displayModeLabel(for mode: DisplayMode) -> some View {
-        Text(mode.title).tag(mode)
     }
 
     @ViewBuilder
@@ -255,9 +271,7 @@ struct ContentView: View {
     }
 
     private enum Layout {
-        static let displayModeHorizontalPadding: CGFloat = 16
-        static let displayModeTopPadding: CGFloat = 8
-        static let displayModeBottomPadding: CGFloat = 8
+        static let displayModeControlMaxWidth: CGFloat = 160
     }
 }
 
