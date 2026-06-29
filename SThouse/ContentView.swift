@@ -32,52 +32,46 @@ struct ContentView: View {
     @State private var viewModel = InventoryListViewModel()
     @State private var isShowingLocationManagement = false
     @State private var displayMode: DisplayMode = .tree
-    @State private var isSearchBarVisible = false
-    @State private var searchBarVisibilityTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    HStack(spacing: 16) {
-                        SummaryCard(title: "inventory.summary.itemTypes", value: "\(viewModel.itemCount)")
-                        SummaryCard(title: "inventory.summary.totalQuantity", value: "\(viewModel.totalQuantity)")
-                    }
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                }
+            VStack(spacing: 0) {
+                displayModeHeader
+                    .padding(.horizontal, Layout.displayModeHorizontalPadding)
+                    .padding(.top, Layout.displayModeTopPadding)
+                    .padding(.bottom, Layout.displayModeBottomPadding)
 
-                Section {
-                    SyncStatusCard(
-                        indicator: viewModel.syncIndicator,
-                        pendingChangeCount: viewModel.pendingChangeCount,
-                        lastSuccessfulSyncAt: viewModel.lastSuccessfulSyncAt,
-                        onSync: {
-                            Task {
-                                await viewModel.syncNow()
-                            }
+                List {
+                    Section {
+                        HStack(spacing: 16) {
+                            SummaryCard(title: "inventory.summary.itemTypes", value: "\(viewModel.itemCount)")
+                            SummaryCard(title: "inventory.summary.totalQuantity", value: "\(viewModel.totalQuantity)")
                         }
-                    )
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                }
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                    }
 
-                displayModeSection
-                inventorySection
+                    Section {
+                        SyncStatusCard(
+                            indicator: viewModel.syncIndicator,
+                            pendingChangeCount: viewModel.pendingChangeCount,
+                            lastSuccessfulSyncAt: viewModel.lastSuccessfulSyncAt,
+                            onSync: {
+                                Task {
+                                    await viewModel.syncNow()
+                                }
+                            }
+                        )
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                    }
+
+                    inventorySection
+                }
             }
             .dismissKeyboardOnTap()
             .navigationTitle("app.name")
-            .searchableIfNeeded(
-                text: $viewModel.searchQuery,
-                isEnabled: isSearchBarVisible && displayMode == .list,
-                prompt: "inventory.search.prompt"
-            )
-            .onAppear {
-                updateSearchBarVisibility(for: displayMode)
-            }
-            .onChange(of: displayMode) { _, newDisplayMode in
-                updateSearchBarVisibility(for: newDisplayMode)
-            }
+            .searchable(text: $viewModel.searchQuery, prompt: "inventory.search.prompt")
             .onChange(of: scenePhase) { _, newPhase in
                 guard newPhase == .active else {
                     return
@@ -153,20 +147,6 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private var displayModeSection: some View {
-        Section {
-            Picker("inventory.view.mode", selection: $displayMode) {
-                ForEach(DisplayMode.allCases) { mode in
-                    displayModeLabel(for: mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
-        }
-    }
-
-    @ViewBuilder
     private var inventorySection: some View {
         switch displayMode {
         case .tree:
@@ -211,6 +191,15 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private var displayModeHeader: some View {
+        Picker("inventory.view.mode", selection: $displayMode) {
+            ForEach(DisplayMode.allCases) { mode in
+                displayModeLabel(for: mode)
+            }
+        }
+        .pickerStyle(.segmented)
     }
 
     private func displayModeLabel(for mode: DisplayMode) -> some View {
@@ -265,28 +254,10 @@ struct ContentView: View {
         InventoryCategory(rawValue: categoryCode)?.localizedTitle ?? categoryCode
     }
 
-    private func updateSearchBarVisibility(for displayMode: DisplayMode) {
-        searchBarVisibilityTask?.cancel()
-
-        isSearchBarVisible = false
-
-        guard displayMode == .list else {
-            return
-        }
-
-        searchBarVisibilityTask = Task { @MainActor in
-            do {
-                try await Task.sleep(for: .milliseconds(250))
-            } catch {
-                return
-            }
-
-            guard !Task.isCancelled else {
-                return
-            }
-
-            isSearchBarVisible = true
-        }
+    private enum Layout {
+        static let displayModeHorizontalPadding: CGFloat = 16
+        static let displayModeTopPadding: CGFloat = 8
+        static let displayModeBottomPadding: CGFloat = 8
     }
 }
 
@@ -671,21 +642,6 @@ private struct InventoryRowButtonStyle: ButtonStyle {
             }
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-}
-
-private extension View {
-    @ViewBuilder
-    func searchableIfNeeded(
-        text: Binding<String>,
-        isEnabled: Bool,
-        prompt: LocalizedStringKey
-    ) -> some View {
-        if isEnabled {
-            searchable(text: text, prompt: prompt)
-        } else {
-            self
-        }
     }
 }
 
