@@ -9,6 +9,7 @@ import Foundation
 import Observation
 import SwiftUI
 import FirebaseAuth
+import Network
 
 @MainActor
 @Observable
@@ -24,6 +25,7 @@ final class InventoryStore {
     @ObservationIgnored private var pendingMutations: [InventoryPendingMutation]
     @ObservationIgnored private let persistence: InventoryLocalPersistence
     @ObservationIgnored private let remoteSync: InventoryRemoteSyncing
+    @ObservationIgnored private let networkMonitor: NetworkMonitor
     @ObservationIgnored private var syncState: InventorySyncState
     @ObservationIgnored private var syncTask: Task<Void, Never>?
 
@@ -31,6 +33,8 @@ final class InventoryStore {
         let persistenceNamespace = Auth.auth().currentUser != nil ? Self.sharedPersistenceNamespace : "offline"
         let persistence = InventoryLocalPersistence(namespace: persistenceNamespace)
         self.persistence = persistence
+        let networkMonitor = NetworkMonitor()
+        self.networkMonitor = networkMonitor
         let remoteSync = FirebaseSyncClient()
         if remoteSync.isEnabled {
             self.remoteSync = remoteSync
@@ -51,6 +55,12 @@ final class InventoryStore {
         } else {
             self.items = []
             self.locations = []
+        }
+
+        networkMonitor.onConnectivityChange = { [weak self] isConnected in
+            Task { @MainActor [weak self] in
+                self?.handleConnectivityChange(isConnected: isConnected)
+            }
         }
 
         Task {
@@ -247,6 +257,12 @@ final class InventoryStore {
             return
         }
 
+        guard networkMonitor.isConnected else {
+            syncIndicator = .offline
+            pendingChangeCount = pendingMutations.count
+            return
+        }
+
         guard syncTask == nil else {
             return
         }
@@ -284,6 +300,8 @@ final class InventoryStore {
 
                 if !remoteSync.isEnabled {
                     syncIndicator = .disabled
+                } else if !networkMonitor.isConnected {
+                    syncIndicator = .offline
                 } else if let error = snapshot.syncState.lastErrorDescription {
                     syncIndicator = .failed(error)
                 } else {
@@ -328,6 +346,29 @@ final class InventoryStore {
 
         Task {
             await persistSnapshot()
+        }
+    }
+
+    private func handleConnectivityChange(isConnected: Bool) {
+        guard remoteSync.isEnabled else {
+            syncIndicator = .disabled
+            return
+        }
+
+        pendingChangeCount = pendingMutations.count
+
+        if isConnected {
+            guard syncIndicator == .offline else {
+                return
+            }
+
+            if syncTask == nil {
+                Task {
+                    await syncNow()
+                }
+            }
+        } else if syncTask == nil {
+            syncIndicator = .offline
         }
     }
 
@@ -400,6 +441,27 @@ final class InventoryStore {
     private func currentEditorIdentity() -> String? {
         let user = Auth.auth().currentUser
         return user?.email ?? user?.uid
+    }
+}
+
+private final class NetworkMonitor {
+    private let monitor = NWPathMonitor()
+    private let queue = DispatchQueue(label: "SThouse.NetworkMonitor")
+    var onConnectivityChange: ((Bool) -> Void)?
+
+    init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            self?.onConnectivityChange?(path.status == .satisfied)
+        }
+        monitor.start(queue: queue)
+    }
+
+    deinit {
+        monitor.cancel()
+    }
+
+    var isConnected: Bool {
+        monitor.currentPath.status == .satisfied
     }
 }
 

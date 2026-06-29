@@ -21,11 +21,13 @@
 "inventory.sync.pendingChanges" = "%lld pending local change(s)";
 "inventory.sync.status.offlineOnly" = "Offline only";
 "inventory.sync.status.synced" = "Synced";
+"inventory.sync.status.offline" = "Offline";
 "inventory.sync.status.syncing" = "Syncing";
 "inventory.sync.status.failed" = "Sync failed";
 "inventory.sync.detail.disabled" = "Sign in to enable cloud sync.";
 "inventory.sync.detail.lastSync" = "Last sync %@";
 "inventory.sync.detail.ready" = "Local data is ready.";
+"inventory.sync.detail.offline" = "No network connection. Local changes will sync when you're back online.";
 "inventory.sync.detail.syncing" = "Pushing local changes and fetching the latest inventory.";
 "inventory.sync.error.invalidItem" = "Invalid item document %@.";
 "inventory.sync.error.invalidLocation" = "Invalid location document %@.";

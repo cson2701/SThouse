@@ -407,6 +407,8 @@ private struct SyncStatusCard: View {
                 )
             }
             return String(localized: "inventory.sync.detail.ready")
+        case .offline:
+            return String(localized: "inventory.sync.detail.offline")
         case .syncing:
             return String(localized: "inventory.sync.detail.syncing")
         case .failed(let message):
@@ -420,6 +422,8 @@ private struct SyncStatusCard: View {
             .secondary
         case .idle:
             .green
+        case .offline:
+            .orange
         case .syncing:
             .blue
         case .failed:

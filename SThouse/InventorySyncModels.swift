@@ -66,6 +66,7 @@ struct InventoryPendingMutation: Identifiable, Codable, Equatable {
 enum InventorySyncIndicator: Equatable {
     case disabled
     case idle
+    case offline
     case syncing
     case failed(String)
 
@@ -75,6 +76,8 @@ enum InventorySyncIndicator: Equatable {
             return String(localized: "inventory.sync.status.offlineOnly")
         case .idle:
             return String(localized: "inventory.sync.status.synced")
+        case .offline:
+            return String(localized: "inventory.sync.status.offline")
         case .syncing:
             return String(localized: "inventory.sync.status.syncing")
         case .failed:
@@ -88,6 +91,8 @@ enum InventorySyncIndicator: Equatable {
             return "wifi.slash"
         case .idle:
             return "checkmark.icloud"
+        case .offline:
+            return "wifi.exclamationmark"
         case .syncing:
             return "arrow.triangle.2.circlepath.icloud"
         case .failed:

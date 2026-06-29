@@ -21,11 +21,13 @@
 "inventory.sync.pendingChanges" = "%lld 个待同步本地更改";
 "inventory.sync.status.offlineOnly" = "仅离线";
 "inventory.sync.status.synced" = "已同步";
+"inventory.sync.status.offline" = "离线";
 "inventory.sync.status.syncing" = "同步中";
 "inventory.sync.status.failed" = "同步失败";
 "inventory.sync.detail.disabled" = "登录后即可启用云同步。";
 "inventory.sync.detail.lastSync" = "上次同步 %@";
 "inventory.sync.detail.ready" = "本地数据已就绪。";
+"inventory.sync.detail.offline" = "当前无网络连接。恢复联网后会同步本地更改。";
 "inventory.sync.detail.syncing" = "正在推送本地更改并获取最新库存。";
 "inventory.sync.error.invalidItem" = "无效的物品文档 %@。";
 "inventory.sync.error.invalidLocation" = "无效的位置文档 %@。";
