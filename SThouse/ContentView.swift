@@ -7,7 +7,6 @@
 
 import Foundation
 import SwiftUI
-import UIKit
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
@@ -32,6 +31,9 @@ struct ContentView: View {
     @State private var viewModel = InventoryListViewModel()
     @State private var isShowingLocationManagement = false
     @State private var displayMode: DisplayMode = .tree
+    @State private var treeViewportFrame: CGRect = .zero
+    @State private var treeRowFrames: [String: CGRect] = [:]
+    @State private var pendingTreeScrollRowIDs: [String] = []
 
     var body: some View {
         NavigationStack {
@@ -140,10 +142,30 @@ struct ContentView: View {
     }
 
     private func inventoryList(for mode: DisplayMode) -> some View {
-        List {
-            summarySection
-            syncSection
-            inventorySection(for: mode)
+        ScrollViewReader { proxy in
+            List {
+                summarySection
+                syncSection
+                inventorySection(for: mode, scrollProxy: proxy)
+            }
+            .background {
+                if mode == .tree {
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: TreeViewportFramePreferenceKey.self,
+                            value: geometry.frame(in: .global)
+                        )
+                    }
+                }
+            }
+            .onPreferenceChange(TreeViewportFramePreferenceKey.self) { frame in
+                treeViewportFrame = frame
+                resolvePendingTreeScroll(with: proxy)
+            }
+            .onPreferenceChange(TreeRowFramePreferenceKey.self) { frames in
+                treeRowFrames = frames
+                resolvePendingTreeScroll(with: proxy)
+            }
         }
     }
 
@@ -176,7 +198,7 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func inventorySection(for mode: DisplayMode) -> some View {
+    private func inventorySection(for mode: DisplayMode, scrollProxy: ScrollViewProxy) -> some View {
         switch mode {
         case .tree:
             Section("inventory.section.inventory") {
@@ -191,7 +213,11 @@ struct ContentView: View {
                         store: viewModel.store,
                         onAddItemAtLocation: { viewModel.activeSheet = .add($0) },
                         onEditItem: { viewModel.activeSheet = .edit($0) },
-                        onDeleteItem: { viewModel.requestDelete($0) }
+                        onDeleteItem: { viewModel.requestDelete($0) },
+                        onExpandToRowIDs: { rowIDs in
+                            pendingTreeScrollRowIDs = rowIDs
+                            resolvePendingTreeScroll(with: scrollProxy)
+                        }
                     )
                 }
             }
@@ -272,6 +298,42 @@ struct ContentView: View {
 
     private enum Layout {
         static let displayModeControlMaxWidth: CGFloat = 160
+        static let treeScrollTopPadding: CGFloat = 12
+        static let treeScrollBottomPadding: CGFloat = 24
+    }
+
+    private func resolvePendingTreeScroll(with scrollProxy: ScrollViewProxy) {
+        guard displayMode == .tree, !pendingTreeScrollRowIDs.isEmpty else {
+            return
+        }
+
+        guard treeViewportFrame != .zero else {
+            return
+        }
+
+        let topBoundary = treeViewportFrame.minY + Layout.treeScrollTopPadding
+        let bottomBoundary = treeViewportFrame.maxY - Layout.treeScrollBottomPadding
+        let candidateFrames = pendingTreeScrollRowIDs.compactMap { rowID in
+            treeRowFrames[rowID].map { (rowID: rowID, frame: $0) }
+        }
+
+        guard !candidateFrames.isEmpty else {
+            return
+        }
+
+        if let topHiddenRowID = candidateFrames.first(where: { $0.frame.minY < topBoundary })?.rowID {
+            pendingTreeScrollRowIDs = []
+            withAnimation(.easeInOut(duration: 0.2)) {
+                scrollProxy.scrollTo(topHiddenRowID, anchor: .center)
+            }
+        } else if let bottomHiddenRowID = candidateFrames.last(where: { $0.frame.maxY > bottomBoundary })?.rowID {
+            pendingTreeScrollRowIDs = []
+            withAnimation(.easeInOut(duration: 0.2)) {
+                scrollProxy.scrollTo(bottomHiddenRowID, anchor: .bottom)
+            }
+        } else {
+            pendingTreeScrollRowIDs = []
+        }
     }
 }
 
@@ -406,6 +468,36 @@ private extension View {
     func inventoryCardSurface() -> some View {
         modifier(InventoryCardSurfaceModifier())
     }
+
+    func treeRowFrame(id: String) -> some View {
+        background {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: TreeRowFramePreferenceKey.self,
+                    value: [id: geometry.frame(in: .global)]
+                )
+            }
+        }
+    }
+}
+
+private struct TreeViewportFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next != .zero {
+            value = next
+        }
+    }
+}
+
+private struct TreeRowFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
 }
 
 private struct TreeInventoryView: View {
@@ -413,6 +505,7 @@ private struct TreeInventoryView: View {
     let onAddItemAtLocation: (UUID) -> Void
     let onEditItem: (InventoryItem) -> Void
     let onDeleteItem: (InventoryItem) -> Void
+    let onExpandToRowIDs: ([String]) -> Void
     @State private var expandedRowIDs: Set<String> = ["unassigned"]
 
     var body: some View {
@@ -422,8 +515,10 @@ private struct TreeInventoryView: View {
                 expandedRowIDs: $expandedRowIDs,
                 onAddItemAtLocation: onAddItemAtLocation,
                 onEditItem: onEditItem,
-                onDeleteItem: onDeleteItem
+                onDeleteItem: onDeleteItem,
+                onExpandToRowIDs: onExpandToRowIDs
             )
+            .id(row.id)
         }
         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
     }
@@ -456,7 +551,7 @@ private struct TreeInventoryView: View {
 
         return .location(
             location,
-            subtitle: location.parentID == nil ? nil : store.locationPathDescription(for: location.id),
+            subtitle: nil,
             count: store.totalItemCount(in: location.id),
             children: childLocations + directItems
         )
@@ -495,7 +590,7 @@ private struct TreeInventoryRow: View {
     let onAddItemAtLocation: (UUID) -> Void
     let onEditItem: (InventoryItem) -> Void
     let onDeleteItem: (InventoryItem) -> Void
-    @State private var isShowingMenu = false
+    let onExpandToRowIDs: ([String]) -> Void
 
     var body: some View {
         switch row {
@@ -507,8 +602,10 @@ private struct TreeInventoryRow: View {
                         expandedRowIDs: $expandedRowIDs,
                         onAddItemAtLocation: onAddItemAtLocation,
                         onEditItem: onEditItem,
-                        onDeleteItem: onDeleteItem
+                        onDeleteItem: onDeleteItem,
+                        onExpandToRowIDs: onExpandToRowIDs
                     )
+                    .id(child.id)
                 }
             } label: {
                 rowLabel(
@@ -518,19 +615,16 @@ private struct TreeInventoryRow: View {
                     trailingText: "\(count)"
                 )
                 .contentShape(Rectangle())
+                .treeRowFrame(id: row.id)
                 .onTapGesture {
-                    toggleExpansion(for: row.id)
+                    toggleExpansion(for: row.id, childRowIDs: children.map(\.id))
                 }
-                .onLongPressGesture(minimumDuration: 0.35) {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    isShowingMenu = true
-                }
-            }
-            .confirmationDialog("", isPresented: $isShowingMenu, titleVisibility: .hidden) {
-                Button {
-                    onAddItemAtLocation(location.id)
-                } label: {
-                    Label("inventory.addItem", systemImage: "plus")
+                .contextMenu {
+                    Button {
+                        onAddItemAtLocation(location.id)
+                    } label: {
+                        Label("inventory.addItem", systemImage: "plus")
+                    }
                 }
             }
         case .item(let item):
@@ -541,14 +635,11 @@ private struct TreeInventoryRow: View {
                 trailingText: "x\(item.quantity)"
             )
             .contentShape(Rectangle())
+            .treeRowFrame(id: row.id)
             .onTapGesture {
                 onEditItem(item)
             }
-            .onLongPressGesture(minimumDuration: 0.35) {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                isShowingMenu = true
-            }
-            .confirmationDialog("", isPresented: $isShowingMenu, titleVisibility: .hidden) {
+            .contextMenu {
                 Button {
                     onEditItem(item)
                 } label: {
@@ -569,8 +660,10 @@ private struct TreeInventoryRow: View {
                         expandedRowIDs: $expandedRowIDs,
                         onAddItemAtLocation: onAddItemAtLocation,
                         onEditItem: onEditItem,
-                        onDeleteItem: onDeleteItem
+                        onDeleteItem: onDeleteItem,
+                        onExpandToRowIDs: onExpandToRowIDs
                     )
+                    .id(child.id)
                 }
             } label: {
                 rowLabel(
@@ -580,8 +673,9 @@ private struct TreeInventoryRow: View {
                     trailingText: "\(count)"
                 )
                 .contentShape(Rectangle())
+                .treeRowFrame(id: row.id)
                 .onTapGesture {
-                    toggleExpansion(for: row.id)
+                    toggleExpansion(for: row.id, childRowIDs: children.map(\.id))
                 }
             }
         }
@@ -602,12 +696,15 @@ private struct TreeInventoryRow: View {
         )
     }
 
-    private func toggleExpansion(for rowID: String) {
+    private func toggleExpansion(for rowID: String, childRowIDs: [String] = []) {
         withAnimation(.easeInOut(duration: 0.2)) {
             if expandedRowIDs.contains(rowID) {
                 expandedRowIDs.remove(rowID)
             } else {
                 expandedRowIDs.insert(rowID)
+                if !childRowIDs.isEmpty {
+                    onExpandToRowIDs(childRowIDs)
+                }
             }
         }
     }
