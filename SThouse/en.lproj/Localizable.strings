@@ -32,8 +32,8 @@
 "inventory.summary.itemTypes" = "Item types";
 "inventory.summary.totalQuantity" = "Total qty";
 "inventory.view.mode" = "View mode";
-"inventory.view.tree" = "Tree";
-"inventory.view.list" = "List";
+"inventory.view.tree" = "Rooms";
+"inventory.view.list" = "Items";
 "inventory.section.inventory" = "Inventory";
 "inventory.empty.title" = "No items yet";
 "inventory.empty.subtitle" = "Add your first household item.";

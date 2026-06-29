@@ -32,8 +32,8 @@
 "inventory.summary.itemTypes" = "物品类型";
 "inventory.summary.totalQuantity" = "总数量";
 "inventory.view.mode" = "视图模式";
-"inventory.view.tree" = "树状";
-"inventory.view.list" = "列表";
+"inventory.view.tree" = "房间";
+"inventory.view.list" = "物品";
 "inventory.section.inventory" = "库存";
 "inventory.empty.title" = "还没有物品";
 "inventory.empty.subtitle" = "先添加你的第一个家居物品。";
