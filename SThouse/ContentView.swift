@@ -290,7 +290,7 @@ private struct SummaryCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .inventoryCardSurface()
     }
 }
 
@@ -330,7 +330,7 @@ private struct SyncStatusCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .inventoryCardSurface()
     }
 
     private var detailText: String {
@@ -363,6 +363,48 @@ private struct SyncStatusCard: View {
         case .failed:
             .orange
         }
+    }
+}
+
+private struct InventoryCardSurfaceModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+
+        content
+            .background(cardBackground, in: shape)
+            .overlay {
+                shape.strokeBorder(borderColor, lineWidth: 1)
+            }
+    }
+
+    private var cardBackground: Color {
+        switch colorScheme {
+        case .light:
+            return Color(uiColor: .systemBackground)
+        case .dark:
+            return Color(uiColor: .secondarySystemBackground)
+        @unknown default:
+            return Color(uiColor: .systemBackground)
+        }
+    }
+
+    private var borderColor: Color {
+        switch colorScheme {
+        case .light:
+            return Color.black.opacity(0.06)
+        case .dark:
+            return Color.white.opacity(0.08)
+        @unknown default:
+            return Color.black.opacity(0.06)
+        }
+    }
+}
+
+private extension View {
+    func inventoryCardSurface() -> some View {
+        modifier(InventoryCardSurfaceModifier())
     }
 }
 
