@@ -35,20 +35,14 @@ struct ContentView: View {
     @State private var viewModel = InventoryListViewModel()
     @State private var isShowingLocationManagement = false
     @State private var displayMode: DisplayMode = .tree
+    @State private var pagedDisplayMode: DisplayMode? = .tree
     @State private var treeViewportFrame: CGRect = .zero
     @State private var treeRowFrames: [String: CGRect] = [:]
     @State private var pendingTreeScrollRowIDs: [String] = []
 
     var body: some View {
         NavigationStack {
-            TabView(selection: animatedDisplayModeBinding) {
-                inventoryList(for: .tree)
-                    .tag(DisplayMode.tree)
-
-                inventoryList(for: .list)
-                    .tag(DisplayMode.list)
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
+            inventoryList
             .dismissKeyboardOnTap()
             .navigationTitle("app.name")
             .navigationBarTitleDisplayMode(.inline)
@@ -62,6 +56,22 @@ struct ContentView: View {
                 Task {
                     await viewModel.syncNow()
                 }
+            }
+            .onChange(of: displayMode) { _, newMode in
+                guard pagedDisplayMode != newMode else {
+                    return
+                }
+
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    pagedDisplayMode = newMode
+                }
+            }
+            .onChange(of: pagedDisplayMode) { _, newMode in
+                guard let newMode, displayMode != newMode else {
+                    return
+                }
+
+                displayMode = newMode
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -154,6 +164,26 @@ struct ContentView: View {
         )
     }
 
+    private var inventoryList: some View {
+        GeometryReader { geometry in
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 0) {
+                    inventoryList(for: .tree)
+                        .frame(width: geometry.size.width)
+                        .id(DisplayMode.tree)
+
+                    inventoryList(for: .list)
+                        .frame(width: geometry.size.width)
+                        .id(DisplayMode.list)
+                }
+                .scrollTargetLayout()
+            }
+            .scrollIndicators(.hidden)
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $pagedDisplayMode)
+        }
+    }
+
     private func inventoryList(for mode: DisplayMode) -> some View {
         ScrollViewReader { proxy in
             List {
@@ -172,10 +202,18 @@ struct ContentView: View {
                 }
             }
             .onPreferenceChange(TreeViewportFramePreferenceKey.self) { frame in
+                guard mode == .tree else {
+                    return
+                }
+
                 treeViewportFrame = frame
                 resolvePendingTreeScroll(with: proxy)
             }
             .onPreferenceChange(TreeRowFramePreferenceKey.self) { frames in
+                guard mode == .tree else {
+                    return
+                }
+
                 treeRowFrames = frames
                 resolvePendingTreeScroll(with: proxy)
             }
