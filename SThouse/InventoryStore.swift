@@ -207,11 +207,41 @@ final class InventoryStore {
             return items
         }
 
-        return items.filter { item in
-            item.name.localizedCaseInsensitiveContains(trimmedQuery)
-                || locationPathDescription(for: item.locationID).localizedCaseInsensitiveContains(trimmedQuery)
-                || localizedCategoryName(for: item.category).localizedCaseInsensitiveContains(trimmedQuery)
+        return items.filter { matchesSearch($0, query: trimmedQuery) }
+    }
+
+    func matchesSearch(_ item: InventoryItem, query: String) -> Bool {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            return true
         }
+
+        return item.name.localizedCaseInsensitiveContains(trimmedQuery)
+            || locationPathDescription(for: item.locationID).localizedCaseInsensitiveContains(trimmedQuery)
+            || localizedCategoryName(for: item.category).localizedCaseInsensitiveContains(trimmedQuery)
+    }
+
+    func matchesSearch(_ location: InventoryLocationNode, query: String) -> Bool {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            return true
+        }
+
+        return location.name.localizedCaseInsensitiveContains(trimmedQuery)
+            || locationPathDescription(for: location.id).localizedCaseInsensitiveContains(trimmedQuery)
+    }
+
+    func hasTreeMatches(for query: String) -> Bool {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            return !rootLocations.isEmpty || !items.isEmpty
+        }
+
+        if items(at: nil).contains(where: { matchesSearch($0, query: trimmedQuery) }) {
+            return true
+        }
+
+        return rootLocations.contains { locationHasTreeMatch($0, query: trimmedQuery) }
     }
 
     func directItemCount(at locationID: UUID?) -> Int {
@@ -525,6 +555,18 @@ final class InventoryStore {
 
     private func localizedCategoryName(for categoryCode: String) -> String {
         InventoryCategory(rawValue: categoryCode)?.localizedTitle ?? categoryCode
+    }
+
+    private func locationHasTreeMatch(_ location: InventoryLocationNode, query: String) -> Bool {
+        if matchesSearch(location, query: query) {
+            return true
+        }
+
+        if items(at: location.id).contains(where: { matchesSearch($0, query: query) }) {
+            return true
+        }
+
+        return children(of: location.id).contains { locationHasTreeMatch($0, query: query) }
     }
 
     private func currentEditorIdentity() -> String? {

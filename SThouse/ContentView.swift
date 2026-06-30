@@ -52,6 +52,7 @@ struct ContentView: View {
             .dismissKeyboardOnTap()
             .navigationTitle("app.name")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar, .tabBar)
             .searchable(text: $viewModel.searchQuery, prompt: "inventory.search.prompt")
             .onChange(of: scenePhase) { _, newPhase in
                 guard newPhase == .active else {
@@ -214,15 +215,16 @@ struct ContentView: View {
         switch mode {
         case .tree:
             Section("inventory.section.inventory") {
-                if viewModel.store.rootLocations.isEmpty && viewModel.store.items.isEmpty {
+                if !viewModel.store.hasTreeMatches(for: viewModel.searchQuery) {
                     ContentUnavailableView(
-                        "inventory.tree.empty.title",
-                        systemImage: "tree",
-                        description: Text("inventory.tree.empty.subtitle")
+                        viewModel.isShowingSearchResults ? "inventory.search.empty.title" : "inventory.tree.empty.title",
+                        systemImage: viewModel.isShowingSearchResults ? "magnifyingglass" : "tree",
+                        description: viewModel.isShowingSearchResults ? Text("inventory.search.empty.subtitle") : Text("inventory.tree.empty.subtitle")
                     )
                 } else {
                     TreeInventoryView(
                         store: viewModel.store,
+                        searchQuery: viewModel.searchQuery,
                         onAddItemAtLocation: { viewModel.activeSheet = .add($0) },
                         onEditItem: { viewModel.activeSheet = .edit($0) },
                         onDeleteItem: { viewModel.requestDelete($0) },
@@ -264,10 +266,17 @@ struct ContentView: View {
     private func listInventoryRow(for item: InventoryItem) -> some View {
         InventoryRow(
             item: item,
-            itemName: highlightedText(for: item.name, matching: viewModel.searchQuery),
-            locationLabel: highlightedText(
+            itemName: makeHighlightedText(
+                for: item.name,
+                matching: viewModel.searchQuery,
+                baseColor: .primary,
+                dimmedColor: .secondary.opacity(0.72)
+            ),
+            locationLabel: makeHighlightedText(
                 for: "\(viewModel.locationPathDescription(for: item.locationID))  •  \(localizedCategoryName(for: item.category))",
-                matching: viewModel.searchQuery
+                matching: viewModel.searchQuery,
+                baseColor: .secondary,
+                dimmedColor: .secondary.opacity(0.65)
             ),
             onTap: {
                 viewModel.activeSheet = .edit(item)
@@ -276,32 +285,6 @@ struct ContentView: View {
                 viewModel.requestDelete(item)
             }
         )
-    }
-
-    private func highlightedText(for string: String, matching query: String) -> AttributedString {
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        var attributed = AttributedString(string)
-
-        guard !trimmedQuery.isEmpty else {
-            return attributed
-        }
-
-        var searchStart = string.startIndex
-        while searchStart < string.endIndex,
-              let matchRange = string.range(
-                of: trimmedQuery,
-                options: [.caseInsensitive, .diacriticInsensitive],
-                range: searchStart..<string.endIndex,
-                locale: .current
-              ) {
-            if let attributedRange = Range(matchRange, in: attributed) {
-                attributed[attributedRange].inlinePresentationIntent = .stronglyEmphasized
-            }
-
-            searchStart = matchRange.upperBound
-        }
-
-        return attributed
     }
 
     private func localizedCategoryName(for categoryCode: String) -> String {
@@ -522,6 +505,7 @@ private struct TreeRowFramePreferenceKey: PreferenceKey {
 
 private struct TreeInventoryView: View {
     let store: InventoryStore
+    let searchQuery: String
     let onAddItemAtLocation: (UUID) -> Void
     let onEditItem: (InventoryItem) -> Void
     let onDeleteItem: (InventoryItem) -> Void
@@ -532,6 +516,8 @@ private struct TreeInventoryView: View {
         ForEach(treeRows) { row in
             TreeInventoryRow(
                 row: row,
+                isSearchActive: isShowingSearchResults,
+                searchQuery: searchQuery,
                 expandedRowIDs: $expandedRowIDs,
                 onAddItemAtLocation: onAddItemAtLocation,
                 onEditItem: onEditItem,
@@ -541,13 +527,29 @@ private struct TreeInventoryView: View {
             .id(row.id)
         }
         .listRowInsets(InventoryLayout.rowInsets)
+        .onAppear(perform: updateExpandedRowsForSearch)
+        .onChange(of: searchQuery) { _, _ in
+            updateExpandedRowsForSearch()
+        }
     }
 
     private var orphanItems: [InventoryItem] {
         store.items(at: nil)
     }
 
+    private var trimmedSearchQuery: String {
+        searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isShowingSearchResults: Bool {
+        !trimmedSearchQuery.isEmpty
+    }
+
     private var treeRows: [TreeInventoryRowModel] {
+        if isShowingSearchResults {
+            return filteredTreeRows
+        }
+
         var rows = store.rootLocations.map(makeLocationRow)
 
         if !orphanItems.isEmpty {
@@ -557,6 +559,27 @@ private struct TreeInventoryView: View {
                     subtitle: String(localized: "inventory.tree.unassigned.subtitle"),
                     count: orphanItems.count,
                     children: orphanItems.map(TreeInventoryRowModel.item)
+                ),
+                at: 0
+            )
+        }
+
+        return rows
+    }
+
+    private var filteredTreeRows: [TreeInventoryRowModel] {
+        var rows = store.rootLocations.compactMap(makeFilteredLocationRow)
+        let matchingOrphanItems = orphanItems
+            .filter { store.matchesSearch($0, query: trimmedSearchQuery) }
+            .map(TreeInventoryRowModel.item)
+
+        if !matchingOrphanItems.isEmpty {
+            rows.insert(
+                .unassigned(
+                    title: String(localized: "inventory.tree.unassigned"),
+                    subtitle: String(localized: "inventory.tree.unassigned.subtitle"),
+                    count: matchingOrphanItems.count,
+                    children: matchingOrphanItems
                 ),
                 at: 0
             )
@@ -575,6 +598,35 @@ private struct TreeInventoryView: View {
             count: store.totalItemCount(in: location.id),
             children: childLocations + directItems
         )
+    }
+
+    private func makeFilteredLocationRow(_ location: InventoryLocationNode) -> TreeInventoryRowModel? {
+        if store.matchesSearch(location, query: trimmedSearchQuery) {
+            return makeLocationRow(location)
+        }
+
+        let childLocationMatches = store.children(of: location.id).compactMap(makeFilteredLocationRow)
+        let matchingDirectItems = store.items(at: location.id)
+            .filter { store.matchesSearch($0, query: trimmedSearchQuery) }
+            .map(TreeInventoryRowModel.item)
+        let matchingItemCount = matchingDirectItems.count + childLocationMatches.reduce(0) { partialResult, row in
+            partialResult + row.visibleItemCount
+        }
+
+        guard !childLocationMatches.isEmpty || !matchingDirectItems.isEmpty else {
+            return nil
+        }
+
+        return .location(
+            location,
+            subtitle: nil,
+            count: matchingItemCount,
+            children: childLocationMatches + matchingDirectItems
+        )
+    }
+
+    private func updateExpandedRowsForSearch() {
+        expandedRowIDs = isShowingSearchResults ? Set(treeRows.flatMap(\.expandableRowIDs)) : ["unassigned"]
     }
 }
 
@@ -606,6 +658,8 @@ private enum TreeInventoryRowModel: Identifiable {
 
 private struct TreeInventoryRow: View {
     let row: TreeInventoryRowModel
+    let isSearchActive: Bool
+    let searchQuery: String
     @Binding var expandedRowIDs: Set<String>
     let onAddItemAtLocation: (UUID) -> Void
     let onEditItem: (InventoryItem) -> Void
@@ -619,6 +673,8 @@ private struct TreeInventoryRow: View {
                 ForEach(children) { child in
                     TreeInventoryRow(
                         row: child,
+                        isSearchActive: isSearchActive,
+                        searchQuery: searchQuery,
                         expandedRowIDs: $expandedRowIDs,
                         onAddItemAtLocation: onAddItemAtLocation,
                         onEditItem: onEditItem,
@@ -630,8 +686,20 @@ private struct TreeInventoryRow: View {
             } label: {
                 rowLabel(
                     icon: location.parentID == nil ? "door.left.hand.open" : "cabinet.fill",
-                    title: location.name,
-                    subtitle: subtitle,
+                    title: makeHighlightedText(
+                        for: location.name,
+                        matching: searchQuery,
+                        baseColor: .primary,
+                        dimmedColor: .secondary.opacity(0.72)
+                    ),
+                    subtitle: subtitle.map {
+                        makeHighlightedText(
+                            for: $0,
+                            matching: searchQuery,
+                            baseColor: .secondary,
+                            dimmedColor: .secondary.opacity(0.65)
+                        )
+                    },
                     trailingText: "\(count)"
                 )
                 .contentShape(Rectangle())
@@ -650,8 +718,18 @@ private struct TreeInventoryRow: View {
         case .item(let item):
             rowLabel(
                 icon: "shippingbox.fill",
-                title: item.name,
-                subtitle: localizedCategoryName(for: item.category),
+                title: makeHighlightedText(
+                    for: item.name,
+                    matching: searchQuery,
+                    baseColor: .primary,
+                    dimmedColor: .secondary.opacity(0.72)
+                ),
+                subtitle: makeHighlightedText(
+                    for: localizedCategoryName(for: item.category),
+                    matching: searchQuery,
+                    baseColor: .secondary,
+                    dimmedColor: .secondary.opacity(0.65)
+                ),
                 trailingText: "x\(item.quantity)"
             )
             .contentShape(Rectangle())
@@ -677,6 +755,8 @@ private struct TreeInventoryRow: View {
                 ForEach(children) { child in
                     TreeInventoryRow(
                         row: child,
+                        isSearchActive: isSearchActive,
+                        searchQuery: searchQuery,
                         expandedRowIDs: $expandedRowIDs,
                         onAddItemAtLocation: onAddItemAtLocation,
                         onEditItem: onEditItem,
@@ -688,8 +768,18 @@ private struct TreeInventoryRow: View {
             } label: {
                 rowLabel(
                     icon: "tray.full.fill",
-                    title: title,
-                    subtitle: subtitle,
+                    title: makeHighlightedText(
+                        for: title,
+                        matching: searchQuery,
+                        baseColor: .primary,
+                        dimmedColor: .secondary.opacity(0.72)
+                    ),
+                    subtitle: makeHighlightedText(
+                        for: subtitle,
+                        matching: searchQuery,
+                        baseColor: .secondary,
+                        dimmedColor: .secondary.opacity(0.65)
+                    ),
                     trailingText: "\(count)"
                 )
                 .contentShape(Rectangle())
@@ -704,9 +794,13 @@ private struct TreeInventoryRow: View {
     private func expansionBinding(for rowID: String) -> Binding<Bool> {
         Binding(
             get: {
-                expandedRowIDs.contains(rowID)
+                isSearchActive || expandedRowIDs.contains(rowID)
             },
             set: { isExpanded in
+                guard !isSearchActive else {
+                    return
+                }
+
                 if isExpanded {
                     expandedRowIDs.insert(rowID)
                 } else {
@@ -717,6 +811,10 @@ private struct TreeInventoryRow: View {
     }
 
     private func toggleExpansion(for rowID: String, childRowIDs: [String] = []) {
+        guard !isSearchActive else {
+            return
+        }
+
         withAnimation(.easeInOut(duration: 0.2)) {
             if expandedRowIDs.contains(rowID) {
                 expandedRowIDs.remove(rowID)
@@ -729,7 +827,7 @@ private struct TreeInventoryRow: View {
         }
     }
 
-    private func rowLabel(icon: String, title: String, subtitle: String?, trailingText: String) -> some View {
+    private func rowLabel(icon: String, title: AttributedString, subtitle: AttributedString?, trailingText: String) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: icon)
                 .font(.caption.weight(.semibold))
@@ -743,7 +841,6 @@ private struct TreeInventoryRow: View {
                 if let subtitle {
                     Text(subtitle)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -757,6 +854,58 @@ private struct TreeInventoryRow: View {
 
     private func localizedCategoryName(for categoryCode: String) -> String {
         InventoryCategory(rawValue: categoryCode)?.localizedTitle ?? categoryCode
+    }
+}
+
+private func makeHighlightedText(
+    for string: String,
+    matching query: String,
+    baseColor: Color,
+    dimmedColor: Color
+) -> AttributedString {
+    let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    var attributed = AttributedString(string)
+    attributed.foregroundColor = baseColor
+
+    guard !trimmedQuery.isEmpty else {
+        return attributed
+    }
+
+    attributed.foregroundColor = dimmedColor
+    var searchStart = string.startIndex
+    while searchStart < string.endIndex,
+          let matchRange = string.range(
+            of: trimmedQuery,
+            options: [.caseInsensitive, .diacriticInsensitive],
+            range: searchStart..<string.endIndex,
+            locale: .current
+          ) {
+        if let attributedRange = Range(matchRange, in: attributed) {
+            attributed[attributedRange].foregroundColor = baseColor
+        }
+
+        searchStart = matchRange.upperBound
+    }
+
+    return attributed
+}
+
+private extension TreeInventoryRowModel {
+    var visibleItemCount: Int {
+        switch self {
+        case .location(_, _, let count, _), .unassigned(_, _, let count, _):
+            return count
+        case .item:
+            return 1
+        }
+    }
+
+    var expandableRowIDs: [String] {
+        guard let children else {
+            return []
+        }
+
+        return [id] + children.flatMap(\.expandableRowIDs)
     }
 }
 
@@ -776,7 +925,6 @@ private struct InventoryRow: View {
 
                     Text(locationLabel)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 Spacer(minLength: 12)
