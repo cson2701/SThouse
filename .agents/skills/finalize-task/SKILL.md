@@ -1,9 +1,9 @@
 ---
-name: github-push-pr
-description: Push the current branch and create a pull request for this repository. Use this skill when the user asks to push a branch, open a PR, or push and create a PR. Always use the repository helper `./scripts/push.sh` exactly as provided instead of manually running `git push` or `gh pr create`.
+name: finalize-task
+description: Finalize work on the current branch by pushing it and creating a pull request for this repository. Use this skill when the user asks to finalize a task, push a branch, open a PR, or push and create a PR. Always use the repository helper `./scripts/push.sh` exactly as provided instead of manually running `git push` or `gh pr create`.
 ---
 
-# GitHub Push PR
+# Finalize Task
 
 Use this workflow whenever the user wants to push the current branch and create
 or open a pull request for this repository.
