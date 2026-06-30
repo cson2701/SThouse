@@ -1,6 +1,6 @@
 ---
 name: github-issue-start
-description: Start work on a GitHub issue in this repository. Use this skill when the user asks to begin a GitHub issue, work from an issue number, or prepare a fix/feature from a GitHub issue. Always create or switch to the issue branch with `./create_branch.sh <issue_number>`, analyze the issue, present a concrete plan, and wait for explicit user approval before implementing the plan.
+description: Start work on a GitHub issue in this repository. Use this skill when the user asks to begin a GitHub issue, work from an issue number, or prepare a fix/feature from a GitHub issue. Always create or switch to the issue branch with `./scripts/create_branch.sh <issue_number>`, analyze the issue, present a concrete plan, and wait for explicit user approval before implementing the plan.
 ---
 
 # GitHub Issue Start
@@ -14,7 +14,7 @@ repository.
 1. Run the repository helper exactly as provided:
 
 ```bash
-./create_branch.sh <issue_number>
+./scripts/create_branch.sh <issue_number>
 ```
 
 Do not replace this with a manual branch naming flow unless the script is
