@@ -381,7 +381,11 @@ private struct SyncStatusCard: View {
 
                 Button("inventory.sync.action", action: onSync)
                     .buttonStyle(.borderedProminent)
-                    .disabled(indicator == .syncing || indicator == .disabled)
+                    .disabled(
+                        indicator == .syncing
+                            || indicator == .disabled
+                            || indicator == .offline
+                    )
             }
 
             if pendingChangeCount > 0 {

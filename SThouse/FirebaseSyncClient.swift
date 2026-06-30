@@ -9,7 +9,7 @@ import Foundation
 import FirebaseAuth
 import FirebaseFirestore
 
-struct DisabledRemoteSyncClient: InventoryRemoteSyncing {
+final class DisabledRemoteSyncClient: InventoryRemoteSyncing {
     let isEnabled = false
 
     func sync(snapshot: InventorySnapshot) async throws -> InventorySyncResult {
@@ -20,9 +20,16 @@ struct DisabledRemoteSyncClient: InventoryRemoteSyncing {
             syncedAt: snapshot.syncState.lastSuccessfulSyncAt ?? .now
         )
     }
+
+    func startListening(
+        onUpdate: @escaping @Sendable (InventoryRemoteSnapshot) -> Void,
+        onError: @escaping @Sendable (Error) -> Void
+    ) {}
+
+    func stopListening() {}
 }
 
-struct FirebaseSyncClient: InventoryRemoteSyncing {
+final class FirebaseSyncClient: InventoryRemoteSyncing {
     private static let sharedHouseholdID = "shared-household"
 
     var isEnabled: Bool {
@@ -30,6 +37,12 @@ struct FirebaseSyncClient: InventoryRemoteSyncing {
     }
 
     private let firestore: Firestore
+    private var itemListener: ListenerRegistration?
+    private var locationListener: ListenerRegistration?
+    private var latestItems: [InventoryItem]?
+    private var latestLocations: [InventoryLocationNode]?
+    private var onUpdate: (@Sendable (InventoryRemoteSnapshot) -> Void)?
+    private var onError: (@Sendable (Error) -> Void)?
 
     init(firestore: Firestore = .firestore()) {
         self.firestore = firestore
@@ -136,6 +149,81 @@ struct FirebaseSyncClient: InventoryRemoteSyncing {
 
     private func locationsCollection(householdID: String) -> CollectionReference {
         householdsCollection.document(householdID).collection("locations")
+    }
+
+    func startListening(
+        onUpdate: @escaping @Sendable (InventoryRemoteSnapshot) -> Void,
+        onError: @escaping @Sendable (Error) -> Void
+    ) {
+        stopListening()
+
+        guard let householdID = try? currentHouseholdID() else {
+            return
+        }
+
+        self.onUpdate = onUpdate
+        self.onError = onError
+
+        itemListener = itemsCollection(householdID: householdID).addSnapshotListener { [weak self] snapshot, error in
+            guard let self else { return }
+
+            if let error {
+                self.onError?(error)
+                return
+            }
+
+            guard let snapshot else {
+                return
+            }
+
+            self.latestItems = snapshot.documents.compactMap(InventoryItem.init(document:)).filter { !$0.isDeleted }
+            self.publishSnapshotIfReady()
+        }
+
+        locationListener = locationsCollection(householdID: householdID).addSnapshotListener { [weak self] snapshot, error in
+            guard let self else { return }
+
+            if let error {
+                self.onError?(error)
+                return
+            }
+
+            guard let snapshot else {
+                return
+            }
+
+            self.latestLocations = snapshot.documents.compactMap(InventoryLocationNode.init(document:)).filter { !$0.isDeleted }
+            self.publishSnapshotIfReady()
+        }
+    }
+
+    func stopListening() {
+        itemListener?.remove()
+        locationListener?.remove()
+        itemListener = nil
+        locationListener = nil
+        latestItems = nil
+        latestLocations = nil
+        onUpdate = nil
+        onError = nil
+    }
+
+    private func publishSnapshotIfReady() {
+        guard let latestItems, let latestLocations else {
+            return
+        }
+
+        onUpdate?(
+            InventoryRemoteSnapshot(
+                items: latestItems,
+                locations: latestLocations,
+                syncedAt: .now
+            )
+        )
+    }
+
+    deinit {
+        stopListening()
     }
 }
 

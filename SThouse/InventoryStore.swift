@@ -63,6 +63,8 @@ final class InventoryStore {
             }
         }
 
+        startRemoteListenerIfNeeded()
+
         Task {
             await restorePersistedStateIfAvailable()
             await persistSnapshot()
@@ -330,6 +332,93 @@ final class InventoryStore {
         }
     }
 
+    private func startRemoteListenerIfNeeded() {
+        guard remoteSync.isEnabled else {
+            return
+        }
+
+        remoteSync.startListening(
+            onUpdate: { [weak self] snapshot in
+                Task { @MainActor [weak self] in
+                    self?.applyRemoteSnapshot(snapshot)
+                }
+            },
+            onError: { [weak self] error in
+                Task { @MainActor [weak self] in
+                    self?.handleRemoteListenerError(error)
+                }
+            }
+        )
+    }
+
+    private func applyRemoteSnapshot(_ snapshot: InventoryRemoteSnapshot) {
+        let merged = mergedRemoteSnapshot(snapshot)
+
+        withAnimation(.easeInOut(duration: 0.25)) {
+            items = merged.items
+            locations = merged.locations
+        }
+
+        syncState.lastSuccessfulSyncAt = snapshot.syncedAt
+        syncState.lastErrorDescription = nil
+        lastSuccessfulSyncAt = snapshot.syncedAt
+
+        if syncTask == nil {
+            syncIndicator = networkMonitor.isConnected ? .idle : .offline
+        }
+
+        Task {
+            await persistSnapshot()
+        }
+    }
+
+    private func mergedRemoteSnapshot(_ snapshot: InventoryRemoteSnapshot) -> InventoryRemoteSnapshot {
+        var itemMap = Dictionary(uniqueKeysWithValues: snapshot.items.map { ($0.id, $0) })
+        var locationMap = Dictionary(uniqueKeysWithValues: snapshot.locations.map { ($0.id, $0) })
+
+        for mutation in pendingMutations.sorted(by: { $0.recordedAt < $1.recordedAt }) {
+            switch mutation.entityType {
+            case .item:
+                switch mutation.operation {
+                case .upsert:
+                    if let item = mutation.item {
+                        itemMap[item.id] = item
+                    }
+                case .delete:
+                    itemMap.removeValue(forKey: mutation.entityID)
+                }
+            case .location:
+                switch mutation.operation {
+                case .upsert:
+                    if let location = mutation.location {
+                        locationMap[location.id] = location
+                    }
+                case .delete:
+                    locationMap.removeValue(forKey: mutation.entityID)
+                }
+            }
+        }
+
+        return InventoryRemoteSnapshot(
+            items: Array(itemMap.values).filter { !$0.isDeleted },
+            locations: Array(locationMap.values).filter { !$0.isDeleted },
+            syncedAt: snapshot.syncedAt
+        )
+    }
+
+    private func handleRemoteListenerError(_ error: Error) {
+        guard syncTask == nil, networkMonitor.isConnected else {
+            return
+        }
+
+        syncState.lastErrorDescription = error.localizedDescription
+        syncIndicator = .failed(error.localizedDescription)
+
+        Task {
+            await persistSnapshot()
+        }
+    }
+
     private func applySyncResult(_ result: InventorySyncResult) {
         withAnimation(.easeInOut(duration: 0.25)) {
             items = result.items
@@ -441,6 +530,10 @@ final class InventoryStore {
     private func currentEditorIdentity() -> String? {
         let user = Auth.auth().currentUser
         return user?.email ?? user?.uid
+    }
+
+    deinit {
+        remoteSync.stopListening()
     }
 }
 

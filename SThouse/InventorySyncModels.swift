@@ -7,6 +7,12 @@
 
 import Foundation
 
+struct InventoryRemoteSnapshot {
+    var items: [InventoryItem]
+    var locations: [InventoryLocationNode]
+    var syncedAt: Date
+}
+
 struct InventorySnapshot: Codable {
     var items: [InventoryItem]
     var locations: [InventoryLocationNode]
@@ -108,7 +114,12 @@ struct InventorySyncResult {
     var syncedAt: Date
 }
 
-protocol InventoryRemoteSyncing {
+protocol InventoryRemoteSyncing: AnyObject {
     var isEnabled: Bool { get }
     func sync(snapshot: InventorySnapshot) async throws -> InventorySyncResult
+    func startListening(
+        onUpdate: @escaping @Sendable (InventoryRemoteSnapshot) -> Void,
+        onError: @escaping @Sendable (Error) -> Void
+    )
+    func stopListening()
 }
