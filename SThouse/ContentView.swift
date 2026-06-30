@@ -8,6 +8,10 @@
 import Foundation
 import SwiftUI
 
+private enum InventoryLayout {
+    static let rowInsets = EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16)
+}
+
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     let authSession: FirebaseAuthSession
@@ -37,17 +41,14 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            TabView(selection: animatedDisplayModeBinding) {
                 inventoryList(for: .tree)
-                    .opacity(displayMode == .tree ? 1 : 0)
-                    .allowsHitTesting(displayMode == .tree)
-                    .accessibilityHidden(displayMode != .tree)
+                    .tag(DisplayMode.tree)
 
                 inventoryList(for: .list)
-                    .opacity(displayMode == .list ? 1 : 0)
-                    .allowsHitTesting(displayMode == .list)
-                    .accessibilityHidden(displayMode != .list)
+                    .tag(DisplayMode.list)
             }
+            .tabViewStyle(.page(indexDisplayMode: .never))
             .dismissKeyboardOnTap()
             .navigationTitle("app.name")
             .navigationBarTitleDisplayMode(.inline)
@@ -131,7 +132,7 @@ struct ContentView: View {
     }
 
     private var displayModeNavigationControl: some View {
-        Picker("inventory.view.mode", selection: $displayMode) {
+        Picker("inventory.view.mode", selection: animatedDisplayModeBinding) {
             ForEach(DisplayMode.allCases) { mode in
                 Text(mode.title).tag(mode)
             }
@@ -139,6 +140,17 @@ struct ContentView: View {
         .pickerStyle(.segmented)
         .labelsHidden()
             .frame(maxWidth: Layout.displayModeControlMaxWidth)
+    }
+
+    private var animatedDisplayModeBinding: Binding<DisplayMode> {
+        Binding(
+            get: { displayMode },
+            set: { newValue in
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    displayMode = newValue
+                }
+            }
+        )
     }
 
     private func inventoryList(for mode: DisplayMode) -> some View {
@@ -233,7 +245,7 @@ struct ContentView: View {
                     ForEach(viewModel.filteredItems) { item in
                         listInventoryRow(for: item)
                             .transition(.opacity)
-                            .listRowInsets(EdgeInsets())
+                            .listRowInsets(InventoryLayout.rowInsets)
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button {
                                     viewModel.requestDelete(item)
@@ -528,7 +540,7 @@ private struct TreeInventoryView: View {
             )
             .id(row.id)
         }
-        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+        .listRowInsets(InventoryLayout.rowInsets)
     }
 
     private var orphanItems: [InventoryItem] {
@@ -757,25 +769,26 @@ private struct InventoryRow: View {
 
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(itemName)
                         .font(.body)
 
-                    Spacer()
-
-                    Text("x\(item.quantity)")
-                        .font(.subheadline.bold())
+                    Text(locationLabel)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
-                Text(locationLabel)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                Spacer(minLength: 12)
+
+                VStack {
+                    Text("x\(item.quantity)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .padding(.vertical, 10)
-            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(InventoryRowButtonStyle())
         .contextMenu {
