@@ -154,7 +154,6 @@ private struct LocationLevelView: View {
 private struct LocationNodeRow: View {
     let title: String
     let subtitle: String?
-    let showsChevron: Bool
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -170,12 +169,6 @@ private struct LocationNodeRow: View {
             }
 
             Spacer(minLength: 12)
-
-            if showsChevron {
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
         }
         .contentShape(Rectangle())
         .padding(.vertical, 4)
@@ -231,15 +224,13 @@ private struct LocationSelectionRow: View {
                 NavigationLink(value: node.id) {
                     LocationNodeRow(
                         title: node.name,
-                        subtitle: node.parentID == nil ? nil : store.locationPathDescription(for: node.id),
-                        showsChevron: true
+                        subtitle: node.parentID == nil ? nil : store.locationPathDescription(for: node.id)
                     )
                 }
             } else {
                 LocationNodeRow(
                     title: node.name,
-                    subtitle: node.parentID == nil ? nil : store.locationPathDescription(for: node.id),
-                    showsChevron: false
+                    subtitle: node.parentID == nil ? nil : store.locationPathDescription(for: node.id)
                 )
             }
         }

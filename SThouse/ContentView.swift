@@ -285,7 +285,7 @@ struct ContentView: View {
                     ForEach(viewModel.filteredItems) { item in
                         listInventoryRow(for: item)
                             .transition(.opacity)
-                            .listRowInsets(InventoryLayout.rowInsets)
+                            .listRowInsets(EdgeInsets())
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button {
                                     viewModel.requestDelete(item)
@@ -972,10 +972,14 @@ private struct InventoryRow: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
-                .frame(maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.vertical, InventoryLayout.rowInsets.top)
+            .padding(.horizontal, InventoryLayout.rowInsets.leading)
+            .contentShape(Rectangle())
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
         .buttonStyle(InventoryRowButtonStyle())
         .contextMenu {
             Button {
@@ -996,11 +1000,12 @@ private struct InventoryRow: View {
 private struct InventoryRowButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                Rectangle()
                     .fill(Color.primary.opacity(configuration.isPressed ? 0.10 : 0))
             }
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(Rectangle())
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
