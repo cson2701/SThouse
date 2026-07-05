@@ -8,11 +8,14 @@
 import Foundation
 
 struct InventoryItem: Identifiable, Equatable, Codable {
+    static let demoTag = "demo"
+
     let id: UUID
     var name: String
     var locationID: UUID?
     var category: String
     var quantity: Int
+    var tag: String?
     var lastEditedBy: String?
     var isDeleted: Bool
     var updatedAt: Date
@@ -24,6 +27,7 @@ struct InventoryItem: Identifiable, Equatable, Codable {
         locationID: UUID? = nil,
         category: String,
         quantity: Int,
+        tag: String? = nil,
         lastEditedBy: String? = nil,
         isDeleted: Bool = false,
         updatedAt: Date = .now,
@@ -34,6 +38,7 @@ struct InventoryItem: Identifiable, Equatable, Codable {
         self.locationID = locationID
         self.category = category
         self.quantity = quantity
+        self.tag = tag
         self.lastEditedBy = lastEditedBy
         self.isDeleted = isDeleted
         self.updatedAt = updatedAt

@@ -12,6 +12,7 @@ struct AddItemView: View {
     @State private var viewModel: AddItemViewModel
     @State private var isShowingDeleteConfirmation = false
     @State private var isShowingLocationPicker = false
+    @State private var isShowingCategoryPicker = false
 
     enum Mode {
         case add
@@ -88,12 +89,16 @@ struct AddItemView: View {
                         }
                     }
 
-                    Picker("inventory.field.category", selection: binding(\.category)) {
-                        Text(InventoryCategory.unspecified.localizedTitle).tag(InventoryCategory.unspecified)
-                        ForEach(InventoryCategory.allCases) { category in
-                            if category != .unspecified {
-                                Text(category.localizedTitle).tag(category)
-                            }
+                    Button {
+                        isShowingCategoryPicker = true
+                    } label: {
+                        HStack {
+                            Text("inventory.field.category")
+                            Spacer()
+
+                            Text(categoryLabel)
+                                .foregroundStyle(.primary)
+                                .multilineTextAlignment(.trailing)
                         }
                     }
 
@@ -130,7 +135,7 @@ struct AddItemView: View {
                         accessibilityLabel: mode.saveTitle,
                         style: .prominentBlue
                     ) {
-                        onSave(viewModel.makeItem())
+                        onSave(viewModel.makeItem(categoryID: resolvedCategoryID))
                         dismiss()
                     }
                     .disabled(!viewModel.canSave)
@@ -148,6 +153,9 @@ struct AddItemView: View {
             }
             .sheet(isPresented: $isShowingLocationPicker) {
                 LocationSelectionView(store: store, selectedLocationID: binding(\.selectedLocationID))
+            }
+            .sheet(isPresented: $isShowingCategoryPicker) {
+                CategorySelectionView(store: store, selectedCategoryID: binding(\.selectedCategoryID))
             }
             .alert(
                 "inventory.delete.confirmation.title",
@@ -172,6 +180,14 @@ struct AddItemView: View {
         }
 
         return String(localized: "inventory.location.select")
+    }
+
+    private var categoryLabel: String {
+        store.categoryName(for: resolvedCategoryID)
+    }
+
+    private var resolvedCategoryID: String {
+        store.resolveCategoryID(for: viewModel.selectedCategoryID, fallbackName: nil)
     }
 
     private var lastEditedByLabel: String {

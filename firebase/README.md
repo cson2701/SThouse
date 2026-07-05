@@ -11,6 +11,7 @@
 - `households/shared-household`
 - `households/shared-household/items/{itemId}`
 - `households/shared-household/locations/{locationId}`
+- `households/shared-household/categories/{categoryId}`
 
 All authenticated users share the same household document and subcollections.
 
@@ -27,6 +28,7 @@ All authenticated users share the same household document and subcollections.
 - `name`
 - `category`
 - `quantity`
+- `tag` (optional)
 - `lastEditedBy`
 - `locationId`
 - `deleted`
@@ -37,6 +39,14 @@ All authenticated users share the same household document and subcollections.
 - `id`
 - `name`
 - `parentId`
+- `sortOrder`
+- `deleted`
+- `updatedAt`
+- `serverUpdatedAt`
+
+### Category
+- `id`
+- `name`
 - `sortOrder`
 - `deleted`
 - `updatedAt`
