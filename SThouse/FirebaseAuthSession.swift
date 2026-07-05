@@ -45,6 +45,10 @@ final class FirebaseAuthSession {
         currentUser?.email ?? ""
     }
 
+    var userDisplayName: String {
+        currentUser?.displayName ?? ""
+    }
+
     func signIn(email: String, password: String) async {
         await submit {
             _ = try await Auth.auth().signIn(withEmail: email, password: password)

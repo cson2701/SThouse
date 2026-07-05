@@ -33,7 +33,10 @@ struct ContentView: View {
     }
 
     @State private var viewModel = InventoryListViewModel()
+    @State private var isShowingSettings = false
+    @State private var isShowingSyncStatusPopup = false
     @State private var isShowingLocationManagement = false
+    @State private var isShowingCategoryManagement = false
     @State private var displayMode: DisplayMode = .tree
     @State private var pagedDisplayMode: DisplayMode? = .tree
     @State private var treeViewportFrame: CGRect = .zero
@@ -49,7 +52,7 @@ struct ContentView: View {
             .toolbarBackground(.hidden, for: .navigationBar, .tabBar)
             .searchable(text: $viewModel.searchQuery, prompt: "inventory.search.prompt")
             .onChange(of: scenePhase) { _, newPhase in
-                guard newPhase == .active else {
+                guard newPhase == .active, viewModel.isAutoSyncEnabled else {
                     return
                 }
 
@@ -75,16 +78,10 @@ struct ContentView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Menu {
-                        if !authSession.userEmail.isEmpty {
-                            Text(authSession.userEmail)
-                        }
-
-                        Button("auth.action.signOut", role: .destructive) {
-                            authSession.signOut()
-                        }
+                    Button {
+                        isShowingSettings = true
                     } label: {
-                        Image(systemName: "person.crop.circle")
+                        Image(systemName: "gearshape")
                     }
                 }
 
@@ -93,17 +90,32 @@ struct ContentView: View {
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    ToolbarActionButton(
-                        systemImage: "square.grid.2x2",
-                        accessibilityLabel: "inventory.location.manage"
-                    ) {
-                        isShowingLocationManagement = true
-                    }
-
                     Button {
                         viewModel.activeSheet = .add(nil)
                     } label: {
                         Label("inventory.addItem", systemImage: "plus")
+                    }
+
+                    Menu {
+                        Button("inventory.location.manage") {
+                            isShowingLocationManagement = true
+                        }
+
+                        Button("inventory.category.manage") {
+                            isShowingCategoryManagement = true
+                        }
+
+                        Menu("Debug") {
+                            Button("Add Demo Data") {
+                                viewModel.addDemoData()
+                            }
+
+                            Button("Delete Demo Items", role: .destructive) {
+                                viewModel.deleteDemoItems()
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
                     }
                 }
             }
@@ -121,8 +133,31 @@ struct ContentView: View {
                     }, item: item)
                 }
             }
+            .sheet(isPresented: $isShowingSettings) {
+                SettingsView(
+                    authSession: authSession,
+                    isAutoSyncEnabled: autoSyncBinding
+                )
+            }
+            .sheet(isPresented: $isShowingSyncStatusPopup) {
+                SyncStatusPopupView(
+                    indicator: viewModel.syncIndicator,
+                    pendingChangeCount: viewModel.pendingChangeCount,
+                    lastSuccessfulSyncAt: viewModel.lastSuccessfulSyncAt,
+                    onSync: {
+                        Task {
+                            await viewModel.syncNow()
+                        }
+                    }
+                )
+                .presentationDetents([.height(240)])
+                .presentationDragIndicator(.visible)
+            }
             .sheet(isPresented: $isShowingLocationManagement) {
                 LocationManagementView(store: viewModel.store)
+            }
+            .sheet(isPresented: $isShowingCategoryManagement) {
+                CategoryManagementView(store: viewModel.store)
             }
             .alert(
                 "inventory.delete.confirmation.title",
@@ -225,6 +260,19 @@ struct ContentView: View {
             HStack(spacing: 16) {
                 SummaryCard(title: "inventory.summary.itemTypes", value: "\(viewModel.itemCount)")
                 SummaryCard(title: "inventory.summary.totalQuantity", value: "\(viewModel.totalQuantity)")
+
+                if viewModel.isAutoSyncEnabled {
+                    Button {
+                        isShowingSyncStatusPopup = true
+                    } label: {
+                        CompactSyncStatusCard(
+                            systemImageName: viewModel.syncIndicator.systemImageName,
+                            tintColor: syncIndicatorColor
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text(viewModel.syncIndicator.title))
+                }
             }
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
@@ -233,18 +281,42 @@ struct ContentView: View {
 
     private var syncSection: some View {
         Section {
-            SyncStatusCard(
-                indicator: viewModel.syncIndicator,
-                pendingChangeCount: viewModel.pendingChangeCount,
-                lastSuccessfulSyncAt: viewModel.lastSuccessfulSyncAt,
-                onSync: {
-                    Task {
-                        await viewModel.syncNow()
+            if !viewModel.isAutoSyncEnabled {
+                SyncStatusCard(
+                    indicator: viewModel.syncIndicator,
+                    pendingChangeCount: viewModel.pendingChangeCount,
+                    lastSuccessfulSyncAt: viewModel.lastSuccessfulSyncAt,
+                    onSync: {
+                        Task {
+                            await viewModel.syncNow()
+                        }
                     }
-                }
-            )
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
+                )
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            }
+        }
+    }
+
+    private var autoSyncBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.isAutoSyncEnabled },
+            set: { viewModel.setAutoSyncEnabled($0) }
+        )
+    }
+
+    private var syncIndicatorColor: Color {
+        switch viewModel.syncIndicator {
+        case .disabled:
+            .secondary
+        case .idle:
+            .green
+        case .offline:
+            .orange
+        case .syncing:
+            .blue
+        case .failed:
+            .orange
         }
     }
 
@@ -263,6 +335,7 @@ struct ContentView: View {
                     TreeInventoryView(
                         store: viewModel.store,
                         searchQuery: viewModel.searchQuery,
+                        categoryName: viewModel.categoryName(for:),
                         onAddItemAtLocation: { viewModel.activeSheet = .add($0) },
                         onEditItem: { viewModel.activeSheet = .edit($0) },
                         onDeleteItem: { viewModel.requestDelete($0) },
@@ -311,7 +384,7 @@ struct ContentView: View {
                 dimmedColor: .secondary.opacity(0.72)
             ),
             locationLabel: makeHighlightedText(
-                for: "\(viewModel.locationPathDescription(for: item.locationID))  •  \(localizedCategoryName(for: item.category))",
+                for: "\(viewModel.locationPathDescription(for: item.locationID))  •  \(viewModel.categoryName(for: item.category))",
                 matching: viewModel.searchQuery,
                 baseColor: .secondary,
                 dimmedColor: .secondary.opacity(0.65)
@@ -323,10 +396,6 @@ struct ContentView: View {
                 viewModel.requestDelete(item)
             }
         )
-    }
-
-    private func localizedCategoryName(for categoryCode: String) -> String {
-        InventoryCategory(rawValue: categoryCode)?.localizedTitle ?? categoryCode
     }
 
     private enum Layout {
@@ -370,6 +439,150 @@ struct ContentView: View {
     }
 }
 
+private struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let authSession: FirebaseAuthSession
+    @Binding var isAutoSyncEnabled: Bool
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("settings.account") {
+                    LabeledContent("settings.user.name", value: userName)
+                    LabeledContent("settings.user.email", value: userEmail)
+                }
+
+                Section("settings.sync") {
+                    Toggle("settings.sync.auto", isOn: $isAutoSyncEnabled)
+                }
+
+                Section {
+                    Button("auth.action.signOut", role: .destructive) {
+                        authSession.signOut()
+                        dismiss()
+                    }
+                }
+            }
+            .navigationTitle("settings.title")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    ToolbarActionButton(
+                        systemImage: "xmark",
+                        accessibilityLabel: "inventory.cancel"
+                    ) {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private var userName: String {
+        if !authSession.userDisplayName.isEmpty {
+            return authSession.userDisplayName
+        }
+
+        if !authSession.userEmail.isEmpty {
+            return authSession.userEmail
+        }
+
+        return String(localized: "settings.user.unknown")
+    }
+
+    private var userEmail: String {
+        if !authSession.userEmail.isEmpty {
+            return authSession.userEmail
+        }
+
+        return String(localized: "settings.user.unknown")
+    }
+}
+
+private struct SyncStatusPopupView: View {
+    let indicator: InventorySyncIndicator
+    let pendingChangeCount: Int
+    let lastSuccessfulSyncAt: Date?
+    let onSync: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 12) {
+                    Image(systemName: indicator.systemImageName)
+                        .foregroundStyle(iconColor)
+                        .font(.title2)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(indicator.title)
+                            .font(.headline)
+
+                        Text(detailText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 12)
+
+                    Button("inventory.sync.action", action: onSync)
+                        .buttonStyle(.borderedProminent)
+                        .disabled(
+                            indicator == .syncing
+                                || indicator == .disabled
+                                || indicator == .offline
+                        )
+                }
+
+                if pendingChangeCount > 0 {
+                    Text(String.localizedStringWithFormat(String(localized: "inventory.sync.pendingChanges"), pendingChangeCount))
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(20)
+            .navigationTitle("inventory.sync.popup.title")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private var detailText: String {
+        switch indicator {
+        case .disabled:
+            return String(localized: "inventory.sync.detail.disabled")
+        case .idle:
+            if let lastSuccessfulSyncAt {
+                return String.localizedStringWithFormat(
+                    String(localized: "inventory.sync.detail.lastSync"),
+                    lastSuccessfulSyncAt.formatted(date: .abbreviated, time: .shortened)
+                )
+            }
+            return String(localized: "inventory.sync.detail.ready")
+        case .offline:
+            return String(localized: "inventory.sync.detail.offline")
+        case .syncing:
+            return String(localized: "inventory.sync.detail.syncing")
+        case .failed(let message):
+            return message
+        }
+    }
+
+    private var iconColor: Color {
+        switch indicator {
+        case .disabled:
+            .secondary
+        case .idle:
+            .green
+        case .offline:
+            .orange
+        case .syncing:
+            .blue
+        case .failed:
+            .orange
+        }
+    }
+}
+
 private struct SummaryCard: View {
     let title: String
     let value: String
@@ -382,6 +595,26 @@ private struct SummaryCard: View {
 
             Text(value)
                 .font(.title2.bold())
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .inventoryCardSurface()
+    }
+}
+
+private struct CompactSyncStatusCard: View {
+    let systemImageName: String
+    let tintColor: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("inventory.sync.popup.title")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Image(systemName: systemImageName)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(tintColor)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
@@ -544,6 +777,7 @@ private struct TreeRowFramePreferenceKey: PreferenceKey {
 private struct TreeInventoryView: View {
     let store: InventoryStore
     let searchQuery: String
+    let categoryName: (String) -> String
     let onAddItemAtLocation: (UUID) -> Void
     let onEditItem: (InventoryItem) -> Void
     let onDeleteItem: (InventoryItem) -> Void
@@ -552,13 +786,14 @@ private struct TreeInventoryView: View {
 
     var body: some View {
         ForEach(treeRows) { row in
-            TreeInventoryRow(
-                row: row,
-                isSearchActive: isShowingSearchResults,
-                searchQuery: searchQuery,
-                expandedRowIDs: $expandedRowIDs,
-                onAddItemAtLocation: onAddItemAtLocation,
-                onEditItem: onEditItem,
+                TreeInventoryRow(
+                    row: row,
+                    isSearchActive: isShowingSearchResults,
+                    searchQuery: searchQuery,
+                    categoryName: categoryName,
+                    expandedRowIDs: $expandedRowIDs,
+                    onAddItemAtLocation: onAddItemAtLocation,
+                    onEditItem: onEditItem,
                 onDeleteItem: onDeleteItem,
                 onExpandToRowIDs: onExpandToRowIDs
             )
@@ -698,6 +933,7 @@ private struct TreeInventoryRow: View {
     let row: TreeInventoryRowModel
     let isSearchActive: Bool
     let searchQuery: String
+    let categoryName: (String) -> String
     @Binding var expandedRowIDs: Set<String>
     let onAddItemAtLocation: (UUID) -> Void
     let onEditItem: (InventoryItem) -> Void
@@ -713,6 +949,7 @@ private struct TreeInventoryRow: View {
                         row: child,
                         isSearchActive: isSearchActive,
                         searchQuery: searchQuery,
+                        categoryName: categoryName,
                         expandedRowIDs: $expandedRowIDs,
                         onAddItemAtLocation: onAddItemAtLocation,
                         onEditItem: onEditItem,
@@ -763,7 +1000,7 @@ private struct TreeInventoryRow: View {
                     dimmedColor: .secondary.opacity(0.72)
                 ),
                 subtitle: makeHighlightedText(
-                    for: localizedCategoryName(for: item.category),
+                    for: categoryName(item.category),
                     matching: searchQuery,
                     baseColor: .secondary,
                     dimmedColor: .secondary.opacity(0.65)
@@ -795,6 +1032,7 @@ private struct TreeInventoryRow: View {
                         row: child,
                         isSearchActive: isSearchActive,
                         searchQuery: searchQuery,
+                        categoryName: categoryName,
                         expandedRowIDs: $expandedRowIDs,
                         onAddItemAtLocation: onAddItemAtLocation,
                         onEditItem: onEditItem,
@@ -888,10 +1126,6 @@ private struct TreeInventoryRow: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
         }
-    }
-
-    private func localizedCategoryName(for categoryCode: String) -> String {
-        InventoryCategory(rawValue: categoryCode)?.localizedTitle ?? categoryCode
     }
 }
 
