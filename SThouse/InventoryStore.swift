@@ -15,27 +15,40 @@ import Network
 @Observable
 final class InventoryStore {
     private static let sharedPersistenceNamespace = "shared-household"
+    private static let autoSyncPreferenceKeyPrefix = "inventory.autoSync"
 
     var items: [InventoryItem]
     var locations: [InventoryLocationNode]
+    var categories: [InventoryCategory]
+    var isAutoSyncEnabled: Bool
     var syncIndicator: InventorySyncIndicator
     var lastSuccessfulSyncAt: Date?
     var pendingChangeCount: Int
 
     @ObservationIgnored private var pendingMutations: [InventoryPendingMutation]
     @ObservationIgnored private let persistence: InventoryLocalPersistence
+    @ObservationIgnored private let userDefaults: UserDefaults
+    @ObservationIgnored private let autoSyncPreferenceKey: String
     @ObservationIgnored private let remoteSync: InventoryRemoteSyncing
     @ObservationIgnored private let networkMonitor: NetworkMonitor
     @ObservationIgnored private var syncState: InventorySyncState
     @ObservationIgnored private var syncTask: Task<Void, Never>?
 
-    init(items: [InventoryItem]? = nil, locations: [InventoryLocationNode]? = nil) {
+    init(
+        items: [InventoryItem]? = nil,
+        locations: [InventoryLocationNode]? = nil,
+        categories: [InventoryCategory]? = nil,
+        userDefaults: UserDefaults = .standard
+    ) {
         let persistenceNamespace = Auth.auth().currentUser != nil ? Self.sharedPersistenceNamespace : "offline"
         let persistence = InventoryLocalPersistence(namespace: persistenceNamespace)
         self.persistence = persistence
+        self.userDefaults = userDefaults
+        self.autoSyncPreferenceKey = "\(Self.autoSyncPreferenceKeyPrefix).\(persistenceNamespace)"
         let networkMonitor = NetworkMonitor()
         self.networkMonitor = networkMonitor
         let remoteSync = FirebaseSyncClient()
+        self.isAutoSyncEnabled = userDefaults.object(forKey: "\(Self.autoSyncPreferenceKeyPrefix).\(persistenceNamespace)") as? Bool ?? true
         if remoteSync.isEnabled {
             self.remoteSync = remoteSync
             self.syncIndicator = .idle
@@ -52,9 +65,11 @@ final class InventoryStore {
         if let items, let locations {
             self.items = items
             self.locations = locations
+            self.categories = Self.normalizedCategories(categories ?? InventoryCategory.defaultCategories())
         } else {
             self.items = []
             self.locations = []
+            self.categories = InventoryCategory.defaultCategories()
         }
 
         networkMonitor.onConnectivityChange = { [weak self] isConnected in
@@ -68,7 +83,9 @@ final class InventoryStore {
         Task {
             await restorePersistedStateIfAvailable()
             await persistSnapshot()
-            await syncNow()
+            if isAutoSyncEnabled {
+                await syncNow()
+            }
         }
     }
 
@@ -84,8 +101,27 @@ final class InventoryStore {
         children(of: nil)
     }
 
+    var sortedCategories: [InventoryCategory] {
+        categories
+            .filter { !$0.isDeleted }
+            .sorted { lhs, rhs in
+                if lhs.sortOrder == rhs.sortOrder {
+                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                }
+                return lhs.sortOrder < rhs.sortOrder
+            }
+    }
+
+    var defaultCategoryID: String {
+        categories.contains(where: { $0.id == InventoryCategory.uncategorizedID && !$0.isDeleted })
+            ? InventoryCategory.uncategorizedID
+            : sortedCategories.first?.id ?? InventoryCategory.uncategorizedID
+    }
+
     func addItem(_ item: InventoryItem) {
-        let persistedItem = item.withUpdatedMetadata(editor: currentEditorIdentity())
+        let persistedItem = item
+            .assigningCategory(resolveCategoryID(for: item.category, fallbackName: nil))
+            .withUpdatedMetadata(editor: currentEditorIdentity())
         withAnimation(.easeInOut(duration: 0.25)) {
             items.insert(persistedItem, at: 0)
         }
@@ -98,7 +134,9 @@ final class InventoryStore {
             return
         }
 
-        let updatedItem = item.withUpdatedMetadata(editor: currentEditorIdentity())
+        let updatedItem = item
+            .assigningCategory(resolveCategoryID(for: item.category, fallbackName: nil))
+            .withUpdatedMetadata(editor: currentEditorIdentity())
         withAnimation(.easeInOut(duration: 0.25)) {
             items[index] = updatedItem
         }
@@ -174,6 +212,131 @@ final class InventoryStore {
         schedulePersistenceAndSync()
     }
 
+    @discardableResult
+    func ensureCategory(named name: String) -> InventoryCategory {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let existing = sortedCategories.first(where: { $0.name.compare(trimmedName, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) {
+            return existing
+        }
+
+        let category = InventoryCategory(name: trimmedName, sortOrder: sortedCategories.count)
+        withAnimation(.easeInOut(duration: 0.25)) {
+            categories.append(category)
+        }
+        enqueueCategoryMutation(for: category.withUpdatedTimestamp(), operation: .upsert)
+        schedulePersistenceAndSync()
+        return category
+    }
+
+    func renameCategory(id: String, name: String) {
+        guard id != defaultCategoryID else {
+            return
+        }
+
+        guard let index = categories.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            return
+        }
+
+        let updatedCategory = categories[index].renamed(trimmedName)
+        withAnimation(.easeInOut(duration: 0.25)) {
+            categories[index] = updatedCategory
+        }
+        enqueueCategoryMutation(for: updatedCategory, operation: .upsert)
+        schedulePersistenceAndSync()
+    }
+
+    func deleteCategory(id: String) {
+        guard id != defaultCategoryID, let category = categories.first(where: { $0.id == id }) else {
+            return
+        }
+
+        let fallbackCategoryID = defaultCategoryID
+        let deletedCategory = category.markedDeleted(at: .now)
+        let editor = currentEditorIdentity()
+        var reassignedItemIDs: [UUID] = []
+
+        withAnimation(.easeInOut(duration: 0.25)) {
+            categories.removeAll { $0.id == id }
+            for index in items.indices where items[index].category == id {
+                items[index].category = fallbackCategoryID
+                items[index].updatedAt = .now
+                items[index].lastEditedBy = editor
+                reassignedItemIDs.append(items[index].id)
+            }
+        }
+
+        enqueueCategoryMutation(for: deletedCategory, operation: .delete)
+
+        for item in items where reassignedItemIDs.contains(item.id) {
+            enqueueItemMutation(for: item.withUpdatedMetadata(editor: editor), operation: .upsert)
+        }
+
+        schedulePersistenceAndSync()
+    }
+
+    func category(id: String) -> InventoryCategory? {
+        categories.first(where: { $0.id == id && !$0.isDeleted })
+    }
+
+    func categoryName(for categoryID: String) -> String {
+        category(id: categoryID)?.name ?? categoryID
+    }
+
+    func setAutoSyncEnabled(_ isEnabled: Bool) {
+        guard isAutoSyncEnabled != isEnabled else {
+            return
+        }
+
+        isAutoSyncEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: autoSyncPreferenceKey)
+
+        if isEnabled {
+            startRemoteListenerIfNeeded()
+            Task {
+                await syncNow()
+            }
+        } else {
+            remoteSync.stopListening()
+            if remoteSync.isEnabled {
+                syncIndicator = networkMonitor.isConnected ? .idle : .offline
+            } else {
+                syncIndicator = .disabled
+            }
+        }
+    }
+
+    func resolveCategoryID(for rawValue: String?, fallbackName: String?) -> String {
+        let trimmedValue = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedValue.isEmpty, category(id: trimmedValue) != nil {
+            return trimmedValue
+        }
+
+        if !trimmedValue.isEmpty,
+           let match = sortedCategories.first(where: { $0.name.compare(trimmedValue, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) {
+            return match.id
+        }
+
+        if !trimmedValue.isEmpty {
+            let legacyDefaults = Self.legacyBuiltInCategoryLookup()
+            if let legacyName = legacyDefaults[trimmedValue] {
+                return ensureCategory(named: legacyName).id
+            }
+
+            return ensureCategory(named: trimmedValue).id
+        }
+
+        if let fallbackName {
+            return ensureCategory(named: fallbackName).id
+        }
+
+        return defaultCategoryID
+    }
+
     func location(id: UUID?) -> InventoryLocationNode? {
         guard let id else {
             return nil
@@ -218,7 +381,7 @@ final class InventoryStore {
 
         return item.name.localizedCaseInsensitiveContains(trimmedQuery)
             || locationPathDescription(for: item.locationID).localizedCaseInsensitiveContains(trimmedQuery)
-            || localizedCategoryName(for: item.category).localizedCaseInsensitiveContains(trimmedQuery)
+            || categoryName(for: item.category).localizedCaseInsensitiveContains(trimmedQuery)
     }
 
     func matchesSearch(_ location: InventoryLocationNode, query: String) -> Bool {
@@ -323,8 +486,9 @@ final class InventoryStore {
     private func restorePersistedStateIfAvailable() async {
         do {
             if let snapshot = try persistence.load() {
-                items = snapshot.items.filter { !$0.isDeleted }
+                items = snapshot.items.filter { !$0.isDeleted }.map(normalizedItem(_:))
                 locations = snapshot.locations.filter { !$0.isDeleted }
+                categories = Self.normalizedCategories(snapshot.categories)
                 pendingMutations = snapshot.pendingMutations
                 syncState = snapshot.syncState
                 lastSuccessfulSyncAt = snapshot.syncState.lastSuccessfulSyncAt
@@ -358,12 +522,14 @@ final class InventoryStore {
 
         Task {
             await persistSnapshot()
-            await syncNow()
+            if isAutoSyncEnabled {
+                await syncNow()
+            }
         }
     }
 
     private func startRemoteListenerIfNeeded() {
-        guard remoteSync.isEnabled else {
+        guard remoteSync.isEnabled, isAutoSyncEnabled else {
             return
         }
 
@@ -385,8 +551,9 @@ final class InventoryStore {
         let merged = mergedRemoteSnapshot(snapshot)
 
         withAnimation(.easeInOut(duration: 0.25)) {
-            items = merged.items
+            items = merged.items.map(normalizedItem(_:))
             locations = merged.locations
+            categories = Self.normalizedCategories(merged.categories)
         }
 
         syncState.lastSuccessfulSyncAt = snapshot.syncedAt
@@ -405,6 +572,7 @@ final class InventoryStore {
     private func mergedRemoteSnapshot(_ snapshot: InventoryRemoteSnapshot) -> InventoryRemoteSnapshot {
         var itemMap = Dictionary(uniqueKeysWithValues: snapshot.items.map { ($0.id, $0) })
         var locationMap = Dictionary(uniqueKeysWithValues: snapshot.locations.map { ($0.id, $0) })
+        var categoryMap = Dictionary(uniqueKeysWithValues: snapshot.categories.map { ($0.id, $0) })
 
         for mutation in pendingMutations.sorted(by: { $0.recordedAt < $1.recordedAt }) {
             switch mutation.entityType {
@@ -415,7 +583,9 @@ final class InventoryStore {
                         itemMap[item.id] = item
                     }
                 case .delete:
-                    itemMap.removeValue(forKey: mutation.entityID)
+                    if let itemID = UUID(uuidString: mutation.entityID) {
+                        itemMap.removeValue(forKey: itemID)
+                    }
                 }
             case .location:
                 switch mutation.operation {
@@ -424,7 +594,20 @@ final class InventoryStore {
                         locationMap[location.id] = location
                     }
                 case .delete:
-                    locationMap.removeValue(forKey: mutation.entityID)
+                    if let locationID = UUID(uuidString: mutation.entityID) {
+                        locationMap.removeValue(forKey: locationID)
+                    }
+                }
+            case .category:
+                switch mutation.operation {
+                case .upsert:
+                    if let category = mutation.category {
+                        categoryMap[category.id] = category
+                    }
+                case .delete:
+                    if let deletedCategory = mutation.category {
+                        categoryMap[deletedCategory.id] = deletedCategory
+                    }
                 }
             }
         }
@@ -432,6 +615,7 @@ final class InventoryStore {
         return InventoryRemoteSnapshot(
             items: Array(itemMap.values).filter { !$0.isDeleted },
             locations: Array(locationMap.values).filter { !$0.isDeleted },
+            categories: Self.normalizedCategories(Array(categoryMap.values)),
             syncedAt: snapshot.syncedAt
         )
     }
@@ -451,8 +635,9 @@ final class InventoryStore {
 
     private func applySyncResult(_ result: InventorySyncResult) {
         withAnimation(.easeInOut(duration: 0.25)) {
-            items = result.items
+            items = result.items.map(normalizedItem(_:))
             locations = result.locations
+            categories = Self.normalizedCategories(result.categories)
         }
 
         let acknowledgedSet = Set(result.acknowledgedMutationIDs)
@@ -475,6 +660,11 @@ final class InventoryStore {
         }
 
         pendingChangeCount = pendingMutations.count
+
+        guard isAutoSyncEnabled else {
+            syncIndicator = isConnected ? .idle : .offline
+            return
+        }
 
         if isConnected {
             guard syncIndicator == .offline else {
@@ -505,6 +695,7 @@ final class InventoryStore {
         InventorySnapshot(
             items: items,
             locations: locations,
+            categories: categories,
             pendingMutations: pendingMutations,
             syncState: syncState
         )
@@ -512,12 +703,12 @@ final class InventoryStore {
 
     private func enqueueItemMutation(for item: InventoryItem, operation: InventoryPendingMutation.Operation) {
         pendingMutations.removeAll {
-            $0.entityType == .item && $0.entityID == item.id
+            $0.entityType == .item && $0.entityID == item.id.uuidString
         }
         pendingMutations.append(
             InventoryPendingMutation(
                 entityType: .item,
-                entityID: item.id,
+                entityID: item.id.uuidString,
                 operation: operation,
                 item: item
             )
@@ -526,14 +717,28 @@ final class InventoryStore {
 
     private func enqueueLocationMutation(for location: InventoryLocationNode, operation: InventoryPendingMutation.Operation) {
         pendingMutations.removeAll {
-            $0.entityType == .location && $0.entityID == location.id
+            $0.entityType == .location && $0.entityID == location.id.uuidString
         }
         pendingMutations.append(
             InventoryPendingMutation(
                 entityType: .location,
-                entityID: location.id,
+                entityID: location.id.uuidString,
                 operation: operation,
                 location: location
+            )
+        )
+    }
+
+    private func enqueueCategoryMutation(for category: InventoryCategory, operation: InventoryPendingMutation.Operation) {
+        pendingMutations.removeAll {
+            $0.entityType == .category && $0.entityID == category.id
+        }
+        pendingMutations.append(
+            InventoryPendingMutation(
+                entityType: .category,
+                entityID: category.id,
+                operation: operation,
+                category: category
             )
         )
     }
@@ -553,8 +758,41 @@ final class InventoryStore {
         return ids
     }
 
-    private func localizedCategoryName(for categoryCode: String) -> String {
-        InventoryCategory(rawValue: categoryCode)?.localizedTitle ?? categoryCode
+    private func normalizedItem(_ item: InventoryItem) -> InventoryItem {
+        let categoryID = resolveCategoryID(for: item.category, fallbackName: nil)
+        if categoryID == item.category {
+            return item
+        }
+
+        return item.assigningCategory(categoryID)
+    }
+
+    private static func normalizedCategories(_ categories: [InventoryCategory]) -> [InventoryCategory] {
+        let merged = defaultCategoriesMerged(with: categories.filter { !$0.isDeleted })
+        let deleted = categories.filter(\.isDeleted)
+        return merged + deleted
+    }
+
+    private static func defaultCategoriesMerged(with categories: [InventoryCategory]) -> [InventoryCategory] {
+        var categoryMap = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
+        for category in InventoryCategory.defaultCategories() where categoryMap[category.id] == nil {
+            categoryMap[category.id] = category
+        }
+        return Array(categoryMap.values)
+    }
+
+    private static func legacyBuiltInCategoryLookup() -> [String: String] {
+        [
+            "appliances": String(localized: "inventory.category.appliances"),
+            "cleaning": String(localized: "inventory.category.cleaning"),
+            "electronics": String(localized: "inventory.category.electronics"),
+            "furniture": String(localized: "inventory.category.furniture"),
+            "kitchen": String(localized: "inventory.category.kitchen"),
+            "office": String(localized: "inventory.category.office"),
+            "supplies": String(localized: "inventory.category.supplies"),
+            "textiles": String(localized: "inventory.category.textiles"),
+            "tools": String(localized: "inventory.category.tools")
+        ]
     }
 
     private func locationHasTreeMatch(_ location: InventoryLocationNode, query: String) -> Bool {
@@ -601,6 +839,18 @@ private final class NetworkMonitor {
 }
 
 private extension InventoryItem {
+    func assigningTag(_ tag: String?) -> InventoryItem {
+        var copy = self
+        copy.tag = tag
+        return copy
+    }
+
+    func assigningCategory(_ categoryID: String) -> InventoryItem {
+        var copy = self
+        copy.category = categoryID
+        return copy
+    }
+
     func withUpdatedMetadata(_ date: Date = .now, editor: String?) -> InventoryItem {
         var copy = self
         copy.updatedAt = date

@@ -10,15 +10,52 @@ import Foundation
 struct InventoryRemoteSnapshot {
     var items: [InventoryItem]
     var locations: [InventoryLocationNode]
+    var categories: [InventoryCategory]
     var syncedAt: Date
 }
 
 struct InventorySnapshot: Codable {
     var items: [InventoryItem]
     var locations: [InventoryLocationNode]
+    var categories: [InventoryCategory]
     var pendingMutations: [InventoryPendingMutation]
     var syncState: InventorySyncState
-    var version = 1
+    var version = 2
+
+    init(
+        items: [InventoryItem],
+        locations: [InventoryLocationNode],
+        categories: [InventoryCategory],
+        pendingMutations: [InventoryPendingMutation],
+        syncState: InventorySyncState,
+        version: Int = 2
+    ) {
+        self.items = items
+        self.locations = locations
+        self.categories = categories
+        self.pendingMutations = pendingMutations
+        self.syncState = syncState
+        self.version = version
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case items
+        case locations
+        case categories
+        case pendingMutations
+        case syncState
+        case version
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        items = try container.decode([InventoryItem].self, forKey: .items)
+        locations = try container.decode([InventoryLocationNode].self, forKey: .locations)
+        categories = try container.decodeIfPresent([InventoryCategory].self, forKey: .categories) ?? InventoryCategory.defaultCategories()
+        pendingMutations = try container.decode([InventoryPendingMutation].self, forKey: .pendingMutations)
+        syncState = try container.decode(InventorySyncState.self, forKey: .syncState)
+        version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
+    }
 }
 
 struct InventorySyncState: Codable, Equatable {
@@ -32,6 +69,7 @@ struct InventoryPendingMutation: Identifiable, Codable, Equatable {
     enum EntityType: String, Codable {
         case item
         case location
+        case category
     }
 
     enum Operation: String, Codable {
@@ -41,20 +79,22 @@ struct InventoryPendingMutation: Identifiable, Codable, Equatable {
 
     let id: UUID
     let entityType: EntityType
-    let entityID: UUID
+    let entityID: String
     let operation: Operation
     let item: InventoryItem?
     let location: InventoryLocationNode?
+    let category: InventoryCategory?
     let recordedAt: Date
     var retryCount: Int
 
     init(
         id: UUID = UUID(),
         entityType: EntityType,
-        entityID: UUID,
+        entityID: String,
         operation: Operation,
         item: InventoryItem? = nil,
         location: InventoryLocationNode? = nil,
+        category: InventoryCategory? = nil,
         recordedAt: Date = .now,
         retryCount: Int = 0
     ) {
@@ -64,6 +104,7 @@ struct InventoryPendingMutation: Identifiable, Codable, Equatable {
         self.operation = operation
         self.item = item
         self.location = location
+        self.category = category
         self.recordedAt = recordedAt
         self.retryCount = retryCount
     }
@@ -110,6 +151,7 @@ enum InventorySyncIndicator: Equatable {
 struct InventorySyncResult {
     var items: [InventoryItem]
     var locations: [InventoryLocationNode]
+    var categories: [InventoryCategory]
     var acknowledgedMutationIDs: [UUID]
     var syncedAt: Date
 }
