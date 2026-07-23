@@ -63,3 +63,6 @@ fastlane/test_output
 
 # JetBrains
 .idea/
+
+# Firebase local configuration
+SThouse/GoogleService-Info.plist
